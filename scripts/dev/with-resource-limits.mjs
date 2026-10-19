@@ -25,43 +25,28 @@ if (argv.shift() !== "--" || !argv.length) {
   process.exit(2);
 }
 const guarded =
-  process.env.BOOKORBIT_RESOURCE_GUARD === "1" ||
-  (process.env.BOOKORBIT_RESOURCE_GUARD !== "0" &&
-    hostname().toLowerCase() === "t3code");
+  process.env.BOOKORBIT_RESOURCE_GUARD === "1" || (process.env.BOOKORBIT_RESOURCE_GUARD !== "0" && hostname().toLowerCase() === "t3code");
 const nested = !dev && process.env.BOOKORBIT_HEAVY_CHECK_ACTIVE === "1";
 let command = argv;
 let scopeName;
 let managerArgs = [];
 const env = { ...process.env };
 if (guarded && process.platform !== "linux") {
-  console.error(
-    "[resource-guard] Linux/systemd is required when the guard is enabled.",
-  );
+  console.error("[resource-guard] Linux/systemd is required when the guard is enabled.");
   process.exit(2);
 }
 if (guarded && !nested) {
-  const memoryMb = Number(
-    process.env.BOOKORBIT_CHECK_MEMORY_MB ?? (dev ? 3072 : 4096),
-  );
-  if (
-    !Number.isInteger(memoryMb) ||
-    memoryMb < 32 ||
-    memoryMb > (dev ? 3072 : 4096)
-  ) {
-    console.error(
-      "[resource-guard] Invalid memory budget; checks allow 32-4096 MiB, servers 32-3072 MiB.",
-    );
+  const memoryMb = Number(process.env.BOOKORBIT_CHECK_MEMORY_MB ?? (dev ? 3072 : 4096));
+  if (!Number.isInteger(memoryMb) || memoryMb < 32 || memoryMb > (dev ? 3072 : 4096)) {
+    console.error("[resource-guard] Invalid memory budget; checks allow 32-4096 MiB, servers 32-3072 MiB.");
     process.exit(2);
   }
   const root = process.getuid() === 0;
   managerArgs = root ? [] : ["--user"];
-  scopeName =
-    "bookorbit-" + (dev ? "dev-" : "check-") + randomUUID() + ".scope";
+  scopeName = "bookorbit-" + (dev ? "dev-" : "check-") + randomUUID() + ".scope";
   const runtime = root ? "/run/lock" : process.env.XDG_RUNTIME_DIR;
   if (!runtime) {
-    console.error(
-      "[resource-guard] No user systemd session. Refusing to run an unbounded check.",
-    );
+    console.error("[resource-guard] No user systemd session. Refusing to run an unbounded check.");
     process.exit(2);
   }
   mkdirSync(runtime, { recursive: true });
@@ -81,6 +66,8 @@ if (guarded && !nested) {
     "--",
   ];
   if (!dev) {
+    const heapMb = Math.floor(memoryMb * 0.75);
+    env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --max-old-space-size=${heapMb}`.trim();
     env.BOOKORBIT_HEAVY_CHECK_ACTIVE = "1";
     env.BO_TEST_MAX_WORKERS = "1";
     command = [
@@ -97,13 +84,7 @@ if (guarded && !nested) {
       String(runTimeoutMs / 1000) + "s",
       ...argv,
     ];
-    console.error(
-      "[resource-guard] Host-wide check lock; budget " +
-        memoryMb +
-        " MiB; deadline " +
-        runTimeoutMs +
-        " ms.",
-    );
+    console.error("[resource-guard] Host-wide check lock; budget " + memoryMb + " MiB; deadline " + runTimeoutMs + " ms.");
   } else command = [...scope, ...argv];
 }
 const child = spawn(command[0], command.slice(1), {
@@ -131,9 +112,7 @@ child.on("error", (error) => {
 });
 child.on("exit", (code, signal) => {
   if (guarded && !dev && code !== 0) {
-    console.error(
-      "[resource-guard] Check failed or exceeded its budget. Do not rerun it unguarded; reduce its scope or inspect the unit logs.",
-    );
+    console.error("[resource-guard] Check failed or exceeded its budget. Do not rerun it unguarded; reduce its scope or inspect the unit logs.");
   }
   process.exitCode = code ?? (signal === "SIGINT" ? 130 : 143);
 });

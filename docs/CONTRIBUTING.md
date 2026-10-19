@@ -160,12 +160,13 @@ For E2E tests, suite IDs, coverage thresholds, and the test harness, see [TESTIN
 
 ### Phase 8: Verify Code Quality
 
-The project has two automated gates that catch issues before they reach CI:
+The project checks staged files locally and runs full validation in CI:
 
 - **Pre-commit hook** runs `lint-staged` on your staged files (ESLint + Prettier).
-- **Pre-push hook** runs `pnpm verify:fast` (lint + typecheck + tests). Your push is blocked if this fails.
+- **Pre-push hook** prints a CI reminder without rerunning project checks.
+- **PR workflow** runs full lint, formatting, type checks and tests for each affected package. Wait for CI Gate to pass before merging.
 
-Before marking your PR ready for review, run the full quality gate yourself:
+For optional full local validation, run:
 
 ```bash
 pnpm verify

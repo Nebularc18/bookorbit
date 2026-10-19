@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiJson } from '@/lib/api-json'
 import { useWorkCatalog } from './useWorkCatalog'
-const permission = vi.hoisted(() => vi.fn(() => true))
+const permission = vi.hoisted(() => vi.fn<() => boolean>(() => true))
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: { libraryId: '7' } }) }))
 vi.mock('@/features/library/composables/useLibraryPermissions', () => ({ useLibraryPermissions: () => ({ hasLibraryPermission: permission }) }))
-vi.mock('@/lib/api-json', async (original) => ({ ...(await original<typeof import('@/lib/api-json')>()), apiJson: vi.fn() }))
+vi.mock('@/lib/api-json', async (original) => ({ ...(await original<typeof import('@/lib/api-json')>()), apiJson: vi.fn<typeof apiJson>() }))
 
 describe('work catalog request and reader contracts', () => {
   beforeEach(() => {

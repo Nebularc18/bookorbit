@@ -231,8 +231,7 @@ jobs:
     timeout-minutes: 10
     if: >
       always() &&
-      (needs.dependency-review.result == 'success' || needs.dependency-review.result == 'skipped') &&
-      (needs.pr-conventions.result == 'success' || needs.pr-conventions.result == 'skipped')
+      (needs.dependency-review.result == 'success' || needs.dependency-review.result == 'skipped')
     outputs:
       server: ${{ steps.manual.outputs.server || steps.changes.outputs.server }}
       client: ${{ steps.manual.outputs.client || steps.changes.outputs.client }}
@@ -268,6 +267,7 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
+              - 'scripts/dev/**'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/workflows/ci.yml'
             client:
@@ -276,6 +276,7 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
+              - 'scripts/dev/**'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/workflows/ci.yml'
               - '.github/workflows/crowdin-translations.yml'

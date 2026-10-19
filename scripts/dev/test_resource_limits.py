@@ -19,6 +19,11 @@ def run(*args,timeout=15):
     return subprocess.run(command(*args),env=ENV,capture_output=True,text=True,timeout=timeout)
 
 class GuardTests(unittest.TestCase):
+    def test_node_heap_matches_scope_budget(self):
+        result=run("node","-p","process.env.NODE_OPTIONS")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn("--max-old-space-size=48",result.stdout)
+
     def test_exit_status(self):
         self.assertEqual(run("python3","-c","raise SystemExit(7)").returncode,7)
 
