@@ -737,6 +737,12 @@ export const routes: RouteRecordRaw[] = [
         ],
       },
       {
+        path: '/library/:libraryId/works',
+        name: 'work-catalog',
+        component: () => import('@/features/works/WorkCatalogView.vue'),
+        meta: { title: () => 'Household works' },
+      },
+      {
         path: '/book/:bookId',
         name: 'book-detail',
         component: () => import('@/views/BookDetailView.vue'),

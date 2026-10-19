@@ -38,6 +38,7 @@ import { DjvuModule } from './modules/reader/djvu/djvu.module';
 import { BookmarkModule } from './modules/bookmark/bookmark.module';
 import { BookJournalModule } from './modules/book-journal/book-journal.module';
 import { NotebookModule } from './modules/notebook/notebook.module';
+import { WorkModule } from './modules/work/work.module';
 import { BookModule } from './modules/book/book.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { CoverModule } from './modules/cover/cover.module';
@@ -142,6 +143,7 @@ import { PodcastModule } from './modules/podcast/podcast.module';
     LibraryModule,
     PathModule,
     BookModule,
+    WorkModule,
     AudiobookModule,
     CatalogModule,
     CoverModule,
