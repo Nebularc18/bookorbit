@@ -30,7 +30,7 @@ PR titles and all commits in a PR must follow the [commit guidelines](COMMIT_GUI
 
 Why PR title is required: with squash merges, the final commit analyzed by semantic-release is based on the PR title.
 
-Validation in CI and release checks:
+Validation runs once in the CI workflow:
 
 - PR branch name must follow `BO-123-fix-reader-pagination`
 - PR title must match commitlint rules
@@ -139,6 +139,18 @@ The `container-image.yml` workflow still runs on CI success (push to `main`) and
 
 ---
 
+## Optional PR images
+
+PRs automatically build and scan an amd64 Docker image in CI. Publishing a multi-platform preview image is manual:
+
+1. Wait for CI to pass on the current PR commit.
+2. Go to **Actions** > **PR Image (Manual)** > **Run workflow**.
+3. Select `main` and enter the PR number.
+
+Only open PRs targeting `main` from trusted contributors with branches in this repository can publish images. The workflow verifies successful PR CI for the exact commit before building and publishing `ghcr.io/<owner>/<repo>:pr-<number>-<short-sha>` for amd64 and arm64. Fork PRs remain eligible for the automatic build and scan, but cannot publish images.
+
+---
+
 ## Rollback
 
 ### Rolling back to a previous release
@@ -173,22 +185,13 @@ Then delete the corresponding GitHub Release from the Releases page.
 
 ## Release Workflow Architecture
 
-The `release.yml` workflow has four jobs:
+PR conventions run only in `ci.yml`. Lint, formatting, type checks, tests, and the PR Docker image scan feed one final **CI Gate**. Nightly CI also includes the E2E suites. Test reports remain available as workflow artifacts without creating separate unit test checks.
 
-```
-┌──────────────┐     ┌──────────────────┐
-│  commitlint  │     │ release-dry-run  │    (PR only)
-└──────────────┘     └──────────────────┘
+The `release.yml` workflow has three jobs:
 
-┌──────────────┐     ┌──────────────────┐
-│   release    │────>│  docker-publish  │    (workflow_dispatch only)
-└──────────────┘     └──────────────────┘
-```
-
-- **commitlint**: Validates branch naming, PR title, commit headers, and PR description issue-link and issue-existence rules (PR only).
-- **release-dry-run**: Runs semantic-release in dry-run mode to validate config (PR only).
-- **release**: Creates the actual release (manual dispatch only). Outputs `published`, `version`, and `tag`.
-- **docker-publish**: Builds and pushes Docker image (only when a release was published).
+- **release-dry-run**: Validates semantic-release on PRs that change release configuration, commitlint configuration, root dependencies, the shared setup action, or the release workflow.
+- **release**: Creates the actual release on manual dispatch. Outputs `published`, `version`, and `tag`.
+- **docker-promote**: Builds and pushes the versioned Docker image when a release was published.
 
 ### Concurrency
 
