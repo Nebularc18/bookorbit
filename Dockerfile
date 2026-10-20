@@ -16,6 +16,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 
 COPY packages/ ./packages/
 COPY client/ ./client/
+COPY scripts/dev/with-resource-limits.mjs ./scripts/dev/
 # pnpm 11 defaults verifyDepsBeforeRun to "install", so running a script
 # re-installs first. Each stage installed its own filtered subset with a frozen
 # lockfile two steps up, and no stage carries the whole workspace, so that
@@ -37,6 +38,7 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 
 COPY packages/ ./packages/
 COPY server/ ./server/
+COPY scripts/dev/with-resource-limits.mjs ./scripts/dev/
 RUN pnpm --config.verify-deps-before-run=false --filter server run build
 
 # pnpm deploy prunes to prod deps; dist/ is gitignored so copy it in after.

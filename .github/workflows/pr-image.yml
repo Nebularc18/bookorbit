@@ -31,6 +31,7 @@ jobs:
     outputs:
       head-sha: ${{ steps.pr.outputs.head_sha }}
       image-tag: ${{ steps.pr.outputs.image_tag }}
+      image-name: ${{ steps.pr.outputs.image_name }}
     steps:
       - name: Verify trusted PR and successful CI
         id: pr
@@ -68,6 +69,7 @@ jobs:
           fi
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
           echo "image_tag=pr-${PR_NUMBER}-${head_sha:0:12}" >> "$GITHUB_OUTPUT"
+          echo "image_name=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
 
   publish:
     name: Publish PR Image
@@ -103,7 +105,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.image-tag }}
+          tags: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image-name }}:${{ needs.prepare.outputs.image-tag }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha,scope=ci-yml-pr-image
           cache-to: type=gha,mode=max,scope=ci-yml-pr-image
@@ -111,5 +113,5 @@ jobs:
       - name: Publish image summary
         shell: bash
         env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.image-tag }}
+          IMAGE: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image-name }}:${{ needs.prepare.outputs.image-tag }}
         run: echo "Published \`$IMAGE\` for linux/amd64 and linux/arm64." >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from 'child_process';
 import { createHash } from 'crypto';
-import { copyFile, chmod, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { promisify } from 'util';
@@ -29,9 +29,7 @@ describe('audio metadata round-trip', () => {
     const ffmpegInstaller = requireInstaller('@ffmpeg-installer/ffmpeg') as InstallerPackage;
     const ffprobeInstaller = requireInstaller('@ffprobe-installer/ffprobe') as InstallerPackage;
     ffmpegPath = ffmpegInstaller.path;
-    ffprobePath = join(tempDir, 'ffprobe');
-    await copyFile(ffprobeInstaller.path, ffprobePath);
-    await chmod(ffprobePath, 0o755);
+    ffprobePath = ffprobeInstaller.path;
     vi.stubEnv('FFMPEG_PATH', ffmpegPath);
     vi.stubEnv('FFPROBE_PATH', ffprobePath);
   });
