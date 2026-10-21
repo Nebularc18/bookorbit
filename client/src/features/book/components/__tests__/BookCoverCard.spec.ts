@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import BookCoverCard from '../BookCoverCard.vue'
+import BookFormatChip from '../BookFormatChip.vue'
 import type { BookCard } from '@bookorbit/types'
 import { nextTick, ref } from 'vue'
 import { COVER_ASPECT_RATIO_KEY } from '@/features/book/lib/cover-aspect-ratio'
@@ -210,7 +211,7 @@ describe('BookCoverCard - present state', () => {
       ],
     })
 
-    const badges = wrapper.get('[data-testid="book-edition-badges"]').findAllComponents({ name: 'BookFormatChip' })
+    const badges = wrapper.findAllComponents(BookFormatChip)
     expect(badges.map((badge) => badge.props('formatKey'))).toEqual(['pdf', 'm4b'])
     expect(badges.map((badge) => badge.props('primary'))).toEqual([true, false])
   })
@@ -227,7 +228,7 @@ describe('BookCoverCard - present state', () => {
     })
 
     const overlay = wrapper.get('[data-testid="book-edition-badges"]')
-    expect(overlay.findAllComponents({ name: 'BookFormatChip' }).map((badge) => badge.props('formatKey'))).toEqual(['epub', 'epub:readalong', 'mp3'])
+    expect(wrapper.findAllComponents(BookFormatChip).map((badge) => badge.props('formatKey'))).toEqual(['epub', 'epub:readalong', 'mp3'])
     expect(overlay.find('.lucide-headphones').exists()).toBe(true)
   })
 
