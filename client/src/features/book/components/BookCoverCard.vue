@@ -89,7 +89,6 @@ const openableFiles = computed(() => downloadableFiles.value.filter((file) => RE
 const primaryFile = computed(() => openableFiles.value.find((f) => f.role === 'primary') ?? openableFiles.value[0] ?? null)
 const primaryDownloadFile = computed(() => downloadableFiles.value[0] ?? null)
 const mediaProfile = computed(() => getBookMediaProfile(formatEntries.value.flatMap((entry) => entry.files)))
-const formatOverlayKey = computed(() => formatEntries.value[0]?.key ?? null)
 const isAudiobook = computed(() => mediaProfile.value.primaryMediaKind === 'audiobook')
 const isComic = computed(() => mediaProfile.value.primaryMediaKind === 'comic')
 
@@ -136,7 +135,7 @@ const showSendDialog = ref(false)
 
 const hasProgress = computed(() => props.book.readingProgress != null && props.book.readingProgress > 0)
 const showProgressBar = computed(() => cardOverlays.value.includes('progress-bar') && hasProgress.value)
-const showFormatOverlay = computed(() => cardOverlays.value.includes('format') && formatOverlayKey.value != null)
+const showFormatOverlay = computed(() => cardOverlays.value.includes('format') && formatEntries.value.length > 0)
 const showRatingOverlay = computed(() => cardOverlays.value.includes('rating') && props.book.rating != null)
 const showLockStatusPill = computed(() => cardOverlays.value.includes('lock-status') && !props.selectionMode && !isMissing.value)
 const metadataLocked = computed(() => props.book.hasMetadataLocks)
@@ -502,14 +501,18 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
             <span class="text-[9px] font-bold text-white leading-none">{{ Math.round(book.rating!) }}</span>
           </div>
 
-          <!-- Bottom-right overlay: format badge -->
+          <!-- Bottom-right overlay: edition badges -->
           <div
             v-if="showFormatOverlay && !selectionMode"
-            class="absolute bottom-1.5 right-1.5 z-10 flex items-center gap-0.5 pointer-events-none transition-opacity duration-150"
+            data-testid="book-edition-badges"
+            class="absolute bottom-1.5 right-1.5 z-10 flex max-w-[60%] flex-wrap justify-end gap-0.5 pointer-events-none transition-opacity duration-150"
             :class="overlayFadeClass"
           >
             <BookFormatChip
-              :format-key="formatOverlayKey!"
+              v-for="entry in formatEntries"
+              :key="entry.key"
+              :format-key="entry.key"
+              :primary="entry.primary && formatEntries.length > 1"
               variant="solid"
               class="gap-0.5 rounded-xs px-1.5 py-0.5 text-[8px] font-semibold tracking-widest opacity-90"
             />
