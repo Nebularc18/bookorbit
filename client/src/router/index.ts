@@ -740,7 +740,7 @@ export const routes: RouteRecordRaw[] = [
         path: '/library/:libraryId/works',
         name: 'work-catalog',
         component: () => import('@/features/works/WorkCatalogView.vue'),
-        meta: { title: () => 'Household works' },
+        meta: { title: () => t('works.title') },
       },
       {
         path: '/book/:bookId',

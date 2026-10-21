@@ -1,9 +1,10 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsInt,
   IsOptional,
   IsString,
@@ -18,7 +19,12 @@ export class WorkCatalogQueryDto {
   @Type(() => Number) @IsInt() @Min(1) libraryId!: number;
   @IsOptional() @IsString() @MaxLength(100) language?: string;
   @IsOptional() @IsString() @MaxLength(20) format?: string;
-  @IsOptional() @IsString() @MaxLength(32) @Matches(/^[bw]:[1-9][0-9]*$/) after?: string;
+  @IsOptional() @IsString() @MaxLength(200) search?: string;
+  @IsOptional() @IsString() @MaxLength(34) @Matches(/^(?:[bw]:[1-9][0-9]*|a:[a-f0-9]{32})$/) after?: string;
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  autoGroup = true;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(10000) offset = 0;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(50) limit = 25;
 }
