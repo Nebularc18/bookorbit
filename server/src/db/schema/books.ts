@@ -18,6 +18,8 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
+import { works } from './works';
+
 import { timestamptz } from './columns';
 import { libraryFolders, libraries } from './libraries';
 
@@ -25,6 +27,7 @@ export const books = pgTable(
   'books',
   {
     id: serial('id').primaryKey(),
+    workId: integer('work_id'),
     libraryId: integer('library_id')
       .notNull()
       .references(() => libraries.id, { onDelete: 'cascade' }),
@@ -46,6 +49,8 @@ export const books = pgTable(
       .$onUpdateFn(() => new Date()),
   },
   (t) => [
+    foreignKey({ columns: [t.workId, t.libraryId], foreignColumns: [works.id, works.libraryId], name: 'books_work_library_fk' }),
+    index('books_work_id_idx').on(t.workId),
     uniqueIndex('books_library_id_folder_path_idx').on(t.libraryId, t.folderPath),
     unique('books_id_library_folder_id_unique').on(t.id, t.libraryFolderId),
     index('books_primary_file_id_idx').on(t.primaryFileId),

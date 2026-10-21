@@ -703,6 +703,7 @@ defineOptions({ name: 'HomeView' })
         </template>
 
         <template #actions>
+          <RouterLink v-if="libraryId !== null" :to="`/library/${libraryId}/works`" :class="outlineButton">Household works</RouterLink>
           <BrowseScanButton v-if="canManageLibraries && currentLibrary" class="hidden md:inline-flex" :library="currentLibrary" />
           <button v-if="canUpload && currentLibrary" type="button" :class="cn(outlineButton, 'hidden md:inline-flex')" @click="openUpload">
             <Upload :size="14" class="text-muted-foreground" aria-hidden="true" />

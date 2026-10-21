@@ -326,11 +326,11 @@ For test architecture, suite details, coverage thresholds, the E2E harness, and 
 
 ### Quality Gates
 
-| Command                  | What it checks                               | When to use                  |
-| ------------------------ | -------------------------------------------- | ---------------------------- |
-| `pnpm run verify:fast`   | Lint + typecheck + tests                     | Quick check while developing |
-| `pnpm run verify`        | Lint + typecheck + tests (full)              | Before opening a PR          |
-| `pnpm run verify:strict` | Format check + lint + full typecheck + tests | Strictest gate               |
+| Command                  | What it checks                               | When to use               |
+| ------------------------ | -------------------------------------------- | ------------------------- |
+| `pnpm run verify:fast`   | Lint + typecheck                             | Optional local validation |
+| `pnpm run verify`        | Lint + typecheck + tests (full)              | Before opening a PR       |
+| `pnpm run verify:strict` | Format check + lint + full typecheck + tests | Strictest gate            |
 
 ### Individual Checks
 
@@ -344,10 +344,12 @@ For test architecture, suite details, coverage thresholds, the E2E harness, and 
 
 ### Git Hooks
 
-Two hooks run automatically via [Husky](https://typicode.github.io/husky/):
+Git hooks run automatically via [Husky](https://typicode.github.io/husky/):
 
 - **Pre-commit:** Runs `lint-staged` on staged files. This auto-fixes lint issues and formats code with Prettier. You do not need to format manually before committing.
-- **Pre-push:** Runs `pnpm verify:fast`. Your push is blocked if lint, typecheck, or tests fail.
+- **Pre-push:** Prints a reminder that full validation runs in GitHub CI. It does not rerun project checks.
+
+The PR workflow runs full lint, formatting, type checks and tests for each affected package. Wait for its CI Gate result before merging. `pnpm verify:fast` and `pnpm verify` remain available for optional local validation.
 
 ---
 

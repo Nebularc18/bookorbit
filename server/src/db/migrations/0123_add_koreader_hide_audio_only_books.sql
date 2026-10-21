@@ -1,1 +1,0 @@
-ALTER TABLE "koreader_users" ADD COLUMN "hide_audio_only_books" boolean DEFAULT true NOT NULL;

@@ -19,11 +19,15 @@ CREATE TABLE "kobo_known_positions" (
 	CONSTRAINT "kobo_known_positions_user_id_device_id_book_id_pk" PRIMARY KEY("user_id","device_id","book_id")
 );
 --> statement-breakpoint
+ALTER TABLE "authors" ADD COLUMN "metadata_provider_pinned" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "annotation_sync_state" ADD COLUMN "device_content" jsonb;--> statement-breakpoint
 ALTER TABLE "annotation_sync_state" ADD COLUMN "served_clock" smallint DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "annotations" ADD COLUMN "content_updated_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "bookmarks" ADD COLUMN "book_file_id" integer;--> statement-breakpoint
 ALTER TABLE "kobo_bookmark_links" ADD COLUMN "applied_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "book_request_downloads" ADD COLUMN "release_info_url" text;--> statement-breakpoint
+ALTER TABLE "book_request_downloads" ADD COLUMN "hold_for_review" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "koreader_users" ADD COLUMN "hide_audio_only_books" boolean DEFAULT true NOT NULL;--> statement-breakpoint
 ALTER TABLE "kobo_annotation_serves" ADD CONSTRAINT "kobo_annotation_serves_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "kobo_annotation_serves" ADD CONSTRAINT "kobo_annotation_serves_book_id_books_id_fk" FOREIGN KEY ("book_id") REFERENCES "public"."books"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "kobo_annotation_serves" ADD CONSTRAINT "kobo_annotation_serves_owner_fk" FOREIGN KEY ("device_id","user_id") REFERENCES "public"."kobo_devices"("id","user_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

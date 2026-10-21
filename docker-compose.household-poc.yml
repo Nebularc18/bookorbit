@@ -1,0 +1,17 @@
+name: bookorbit-household-poc
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: poc
+      POSTGRES_PASSWORD: household-disposable-only
+      POSTGRES_DB: bookorbit_poc
+    ports:
+      - "127.0.0.1:55472:5432"
+    volumes:
+      - ./local/household-poc/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poc -d bookorbit_poc"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

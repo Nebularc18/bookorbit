@@ -1,6 +1,6 @@
 {
-  "id": "d9051559-0711-4d52-82a1-e55c01da8f7f",
-  "prevId": "8aa979c3-d6ef-4c91-b26e-9bb1cde9e897",
+  "id": "25725d52-1794-47b8-adc7-497196680879",
+  "prevId": "97ea7e62-4221-48f2-8972-6da469db879c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3673,6 +3673,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "work_id": {
+          "name": "work_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "library_id": {
           "name": "library_id",
           "type": "integer",
@@ -3726,6 +3732,21 @@
         }
       },
       "indexes": {
+        "books_work_id_idx": {
+          "name": "books_work_id_idx",
+          "columns": [
+            {
+              "expression": "work_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "books_library_id_folder_path_idx": {
           "name": "books_library_id_folder_path_idx",
           "columns": [
@@ -3921,6 +3942,15 @@
           "columnsFrom": ["primary_file_id"],
           "columnsTo": ["id"],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "books_work_library_fk": {
+          "name": "books_work_library_fk",
+          "tableFrom": "books",
+          "tableTo": "works",
+          "columnsFrom": ["work_id", "library_id"],
+          "columnsTo": ["id", "library_id"],
+          "onDelete": "no action",
           "onUpdate": "no action"
         },
         "books_library_folder_library_fk": {
@@ -6149,6 +6179,13 @@
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": false
+        },
+        "metadata_provider_pinned": {
+          "name": "metadata_provider_pinned",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "last_enriched_at": {
           "name": "last_enriched_at",
@@ -19854,6 +19891,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "hide_audio_only_books": {
+          "name": "hide_audio_only_books",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -24244,6 +24288,84 @@
           "value": "\"server_identity\".\"id\" = 1"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.works": {
+      "name": "works",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "library_id": {
+          "name": "library_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "works_library_idx": {
+          "name": "works_library_idx",
+          "columns": [
+            {
+              "expression": "library_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "works_library_id_libraries_id_fk": {
+          "name": "works_library_id_libraries_id_fk",
+          "tableFrom": "works",
+          "tableTo": "libraries",
+          "columnsFrom": ["library_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "works_user_id_users_id_fk": {
+          "name": "works_user_id_users_id_fk",
+          "tableFrom": "works",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "works_id_library_unique": {
+          "name": "works_id_library_unique",
+          "nullsNotDistinct": false,
+          "columns": ["id", "library_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },

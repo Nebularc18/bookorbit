@@ -183,3 +183,11 @@ Prefer simple feature boundaries and clear ownership. Match existing project pat
 - Dev: `docker-compose.dev.yml` spins up PostgreSQL only. The app runs natively via `pnpm dev`.
 - Production: `docker-compose.yml` is the deployment compose (app + Postgres + migration job). `Dockerfile` is a multi-stage build that builds the client and server into a slim final image.
 - Required env vars: `DATABASE_URL`, `PORT`, `NODE_ENV`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`, `BOOKS_PATH`.
+
+## T3Code resource safety
+
+- Run checks through package scripts or scripts/dev/with-resource-limits.mjs. Never launch vue-tsc, tsc, vitest, or build commands directly with pnpm exec on T3Code.
+- The host-wide guard allows one heavy check at a time, with a separate 4 GiB systemd scope and a 15-minute deadline. Do not bypass a failed budget or run a check in the shared agent scope.
+- Start future development servers through package dev scripts so they use separate server scopes. Do not restart an existing server merely to move its scope.
+- If a check exceeds its memory budget, reduce or optimize it; do not repeatedly relaunch it without the guard.
+- See scripts/dev/RESOURCE_LIMITS.md. No diagnostic or resource-guard change authorizes modifying the live NAS app.
