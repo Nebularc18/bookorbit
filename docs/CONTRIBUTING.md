@@ -110,7 +110,7 @@ Branch name requirements:
 - Use lowercase kebab-case for the description suffix
 - Example: `BO-123-fix-reader-sync`
 
-Downstream forks can import upstream history through `sync/upstream-main-YYYYMMDD` branches. For same-repository PRs authored by an owner, member, or collaborator, CI exempts these syncs from issue references, branch naming, and Crowdin-only translation restrictions. Title and commit checks, application checks, and image scanning still apply. Ordinary contributions and PRs targeting the upstream repository keep the rules above.
+The PR Conventions CI job runs only for PRs targeting `bookorbit/bookorbit`. PRs targeting downstream forks skip its branch naming, issue reference, localization policy, PR policy script tests, and title and commit checks. Application checks and image scanning still apply in forks. Contributions targeting the upstream repository keep the rules above.
 
 ### Phase 6: Implement Your Change
 
@@ -167,6 +167,13 @@ The project checks staged files locally and runs full validation in CI:
 - **Pre-commit hook** runs `lint-staged` on your staged files (ESLint + Prettier).
 - **Pre-push hook** prints a CI reminder without rerunning project checks.
 - **PR workflow** runs full lint, formatting, type checks and tests for each affected package. Wait for CI Gate to pass before merging.
+
+PR image builds and vulnerability scans run when image inputs change, including application
+code, dependencies, Docker configuration, and bundled assets. Documentation-only PRs skip
+them. Relevant PRs also run the permission-guard smoke suite; full E2E suites run nightly
+or through the manual E2E workflow. PR labeling, stale issue and PR automation, Crowdin
+branch cleanup, and release dry runs are upstream-only. Manual release and image publishing
+remain available in downstream forks.
 
 For optional full local validation, run:
 

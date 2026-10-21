@@ -26,6 +26,7 @@ concurrency:
 jobs:
   stale-prs:
     name: Check Every Open PR
+    if: github.repository == 'bookorbit/bookorbit'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

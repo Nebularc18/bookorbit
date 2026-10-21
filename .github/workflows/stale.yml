@@ -13,6 +13,7 @@ permissions:
 jobs:
   stale:
     name: Mark and Close Stale Issues
+    if: github.repository == 'bookorbit/bookorbit'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

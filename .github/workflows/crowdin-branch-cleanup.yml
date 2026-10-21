@@ -11,7 +11,7 @@ jobs:
   delete-service-branch:
     # The controlled export workflow reuses this branch for its translation PR.
     # Removing it after close guarantees that the next export starts from current main.
-    if: github.event.pull_request.head.ref == 'l10n_main' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.repository == 'bookorbit/bookorbit' && github.event.pull_request.head.ref == 'l10n_main' && github.event.pull_request.head.repo.full_name == github.repository
     name: Delete l10n_main
     runs-on: ubuntu-latest
     timeout-minutes: 5

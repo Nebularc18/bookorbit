@@ -42,7 +42,7 @@ jobs:
 
   pr-conventions:
     name: PR Conventions
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'bookorbit/bookorbit'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -248,7 +248,7 @@ jobs:
   detect-changes:
     name: Detect Changed Paths
     runs-on: ubuntu-latest
-    needs: [dependency-review, pr-conventions]
+    needs: [dependency-review]
     timeout-minutes: 10
     if: >
       always() &&
@@ -256,6 +256,7 @@ jobs:
     outputs:
       server: ${{ steps.manual.outputs.server || steps.changes.outputs.server }}
       client: ${{ steps.manual.outputs.client || steps.changes.outputs.client }}
+      image: ${{ steps.manual.outputs.image || steps.changes.outputs.image }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -269,6 +270,7 @@ jobs:
         run: |
           echo "server=true" >> "$GITHUB_OUTPUT"
           echo "client=true" >> "$GITHUB_OUTPUT"
+          echo "image=true" >> "$GITHUB_OUTPUT"
 
       # For push events dorny/paths-filter diffs github.event.before..github.sha.
       # New-branch pushes (before = 0000...) are handled by treating all files as changed.
@@ -288,6 +290,7 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
+              - 'patches/**'
               - 'scripts/dev/**'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/workflows/ci.yml'
@@ -297,16 +300,34 @@ jobs:
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
+              - 'patches/**'
               - 'scripts/dev/**'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/workflows/ci.yml'
               - '.github/workflows/crowdin-translations.yml'
+            image:
+              - 'server/**'
+              - 'client/**'
+              - 'packages/**'
+              - 'koreader-plugin/**'
+              - 'patches/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'scripts/dev/**'
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'LICENSE'
+              - 'NOTICE'
+              - 'ADDITIONAL_TERMS.md'
+              - '.github/workflows/ci.yml'
 
       - name: Print change scope
         shell: bash
         run: |
           echo "server=${{ steps.manual.outputs.server || steps.changes.outputs.server }}"
           echo "client=${{ steps.manual.outputs.client || steps.changes.outputs.client }}"
+          echo "image=${{ steps.manual.outputs.image || steps.changes.outputs.image }}"
 
   lint:
     name: Lint (${{ matrix.package_label }})
@@ -437,7 +458,6 @@ jobs:
           if [[ "$PACKAGE" == "server" ]]; then
             pnpm --filter server type-check
           else
-            pnpm --filter @bookorbit/types build
             pnpm --filter client type-check
           fi
 
@@ -551,7 +571,7 @@ jobs:
     needs: [detect-changes, lint, typecheck, tests]
     if: >
       always() &&
-      github.event_name == 'schedule' &&
+      (github.event_name == 'schedule' || github.event_name == 'pull_request') &&
       needs.detect-changes.result == 'success' &&
       needs.lint.result == 'success' &&
       needs.typecheck.result == 'success' &&
@@ -584,7 +604,7 @@ jobs:
 
   e2e:
     needs: [e2e-setup]
-    if: github.event_name == 'schedule' && needs.e2e-setup.outputs.matrix != '[]'
+    if: needs.e2e-setup.outputs.matrix != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -641,6 +661,7 @@ jobs:
     if: >
       always() &&
       github.event_name == 'pull_request' &&
+      needs.detect-changes.outputs.image == 'true' &&
       needs.detect-changes.result == 'success' &&
       needs.lint.result == 'success' &&
       needs.typecheck.result == 'success' &&

@@ -11,6 +11,7 @@ permissions:
 jobs:
   label:
     name: Label PR by Changed Paths
+    if: github.repository == 'bookorbit/bookorbit'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
