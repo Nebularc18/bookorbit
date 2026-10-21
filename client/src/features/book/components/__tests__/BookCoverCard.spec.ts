@@ -200,6 +200,44 @@ describe('BookCoverCard — cover aspect override', () => {
 })
 
 describe('BookCoverCard - present state', () => {
+  it('shows both PDF and audiobook editions on the cover with the primary first', () => {
+    const wrapper = mountCard({
+      ...presentBook,
+      files: [
+        { id: 11, format: 'm4b', role: 'content', sizeBytes: null },
+        { id: 10, format: 'pdf', role: 'primary', sizeBytes: null },
+        { id: 12, format: 'jpg', role: 'cover', sizeBytes: null },
+      ],
+    })
+
+    const badges = wrapper.get('[data-testid="book-edition-badges"]').findAllComponents({ name: 'BookFormatChip' })
+    expect(badges.map((badge) => badge.props('formatKey'))).toEqual(['pdf', 'm4b'])
+    expect(badges.map((badge) => badge.props('primary'))).toEqual([true, false])
+  })
+
+  it('shows one audiobook badge for multiple tracks and keeps read-along editions distinct', () => {
+    const wrapper = mountCard({
+      ...presentBook,
+      files: [
+        { id: 10, format: 'epub', role: 'primary', sizeBytes: null },
+        { id: 11, format: 'epub', role: 'content', sizeBytes: null, mediaOverlay: { available: true, durationSeconds: 42 } },
+        { id: 12, format: 'mp3', role: 'content', sizeBytes: null },
+        { id: 13, format: 'mp3', role: 'content', sizeBytes: null },
+      ],
+    })
+
+    const overlay = wrapper.get('[data-testid="book-edition-badges"]')
+    expect(overlay.findAllComponents({ name: 'BookFormatChip' }).map((badge) => badge.props('formatKey'))).toEqual(['epub', 'epub:readalong', 'mp3'])
+    expect(overlay.find('.lucide-headphones').exists()).toBe(true)
+  })
+
+  it('respects the format overlay display setting', () => {
+    cardOverlays.value = []
+    const wrapper = mountCard(presentBook)
+
+    expect(wrapper.find('[data-testid="book-edition-badges"]').exists()).toBe(false)
+  })
+
   it('marks the EPUB format overlay for media-overlay read-along files', () => {
     cardOverlays.value = ['format']
     const wrapper = mountCard({
