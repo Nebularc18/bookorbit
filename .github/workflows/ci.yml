@@ -56,6 +56,26 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.base.sha }}
 
+      - name: Classify downstream upstream sync
+        id: upstream-sync
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+        run: |
+          set -euo pipefail
+          args=("$BASE_REPO" "$HEAD_REPO" "$HEAD_BRANCH" "$AUTHOR_ASSOCIATION")
+          if git cat-file -e "$PR_BASE_SHA:scripts/classify-upstream-sync-pr.sh" 2>/dev/null; then
+            is_sync="$(git show "$PR_BASE_SHA:scripts/classify-upstream-sync-pr.sh" | bash -s -- "${args[@]}")"
+          else
+            is_sync="$(git show "$PR_HEAD_SHA:scripts/classify-upstream-sync-pr.sh" | bash -s -- "${args[@]}")"
+          fi
+          echo "is_sync=$is_sync" >> "$GITHUB_OUTPUT"
+
       - name: Classify Crowdin pull request
         id: crowdin
         shell: bash
@@ -76,7 +96,7 @@ jobs:
           echo "is_crowdin=$is_crowdin" >> "$GITHUB_OUTPUT"
 
       - name: Validate PR branch name
-        if: github.event.pull_request.user.login != 'dependabot[bot]' && steps.crowdin.outputs.is_crowdin != 'true'
+        if: github.event.pull_request.user.login != 'dependabot[bot]' && steps.crowdin.outputs.is_crowdin != 'true' && steps.upstream-sync.outputs.is_sync != 'true'
         shell: bash
         env:
           PR_BRANCH: ${{ github.head_ref }}
@@ -90,7 +110,7 @@ jobs:
           fi
 
       - name: Validate referenced issues exist
-        if: github.event.pull_request.user.login != 'dependabot[bot]' && steps.crowdin.outputs.is_crowdin != 'true'
+        if: github.event.pull_request.user.login != 'dependabot[bot]' && steps.crowdin.outputs.is_crowdin != 'true' && steps.upstream-sync.outputs.is_sync != 'true'
         shell: bash
         env:
           GH_REPO: ${{ github.repository }}
@@ -191,6 +211,7 @@ jobs:
           pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Enforce localization change policy
+        if: steps.upstream-sync.outputs.is_sync != 'true'
         shell: bash
         env:
           IS_CROWDIN: ${{ steps.crowdin.outputs.is_crowdin }}
@@ -207,7 +228,7 @@ jobs:
           node "$validator" "$PR_BASE_SHA" "$PR_HEAD_SHA" "$IS_CROWDIN"
 
       - name: Test PR policy scripts
-        run: node --test scripts/validate-locale-pr.test.mjs
+        run: node --test scripts/validate-locale-pr.test.mjs scripts/classify-upstream-sync-pr.test.mjs
 
       - name: Lint PR title
         shell: bash
