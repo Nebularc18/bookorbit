@@ -4,12 +4,15 @@ export interface WorkEdition {
   language: string | null;
   narrators: string[];
   files: { id: number; format: string }[];
+  savedWorkId?: number | null;
 }
 export interface WorkCatalogItem {
   key: string;
   workId: number | null;
   title: string;
   editions: WorkEdition[];
+  automaticallyGrouped?: boolean;
+  hasMoreEditions?: boolean;
 }
 export interface WorkCatalogPage {
   items: WorkCatalogItem[];

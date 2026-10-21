@@ -8,7 +8,7 @@ This is a development prototype, not a migration plan for an existing household 
 
 ## What changed
 
-- Additive generated migration `0121_household_works`: `works` table and nullable `books.work_id`. A composite foreign key keeps a work inside one library. Existing IDs are unchanged. No bulk backfill is required; an ungrouped edition appears as its own catalog entry.
+- Additive generated migration `0121_household_works`: `works` table and nullable `books.work_id`. A composite foreign key keeps a work inside one library. Existing IDs are unchanged. No bulk backfill is required; the grouped catalog can match editions at read time without saving memberships.
 - `GET /api/v1/works?libraryId=1&language=sv&format=audio` returns a bounded page of works with only matching, accessible editions. `audio` means every audio format supported by the existing server; a concrete format such as `epub` or `mp3` is also accepted. Both filters apply to the same book record. Grouping happens before pagination.
 - `POST /api/v1/works` accepts `{ "title": "Example", "bookIds": [1,2,3,4] }`. It locks editions in ID order, checks editor access and content restrictions, and changes only grouping metadata in a transaction. Existing groups must be ungrouped before regrouping. At most 100 editions per group.
 - `DELETE /api/v1/works/:workId/editions/:bookId` detaches one edition. Files, user positions, ratings and reading attempts remain attached to their original IDs.
@@ -20,6 +20,16 @@ No scheduled backup service or guided restore UI was added. The development back
 The launch/test scripts use the package scripts, which currently include the resource wrapper added by concurrent work. Those resource-wrapper changes are preserved separately.
 
 A work is shared library data. `works.user_id` records its creator, not exclusive ownership. Every list is library and content-filter scoped. Private user data remains in the existing user/edition tables.
+
+## Grouping ebook and audiobook editions
+
+Open **Grouped books** from a library's toolbar to see matching editions together, even when they are stored in separate folders. Automatic grouping is enabled on that page. It matches the same authors, language and title, ignoring capitalization, repeated whitespace and a trailing publication year in parentheses. It does not use fuzzy title matching. Editions without enough metadata remain separate.
+
+For editions that do not match automatically, select their checkboxes, enter a book title and choose **Group editions**. This saves a group without moving files or changing edition IDs, positions, ratings or history. A newly scanned edition with matching metadata also appears with a saved group when there is exactly one matching saved group. Conflicting saved groups remain separate.
+
+Turn off **Automatically group matching editions** to inspect each ungrouped edition separately. **Ungroup edition** removes a saved membership; automatic matching can still display that edition with others while automatic grouping is enabled. The regular library grid, series views and native clients continue to list individual editions.
+
+The catalog API accepts `autoGroup=false` and a bounded `search` title query. Automatic group cursors use `a:` followed by a 32-character digest. Grouping precedes pagination, and each result includes at most 100 matching editions with `hasMoreEditions` when truncated. Library access and content restrictions apply before matching, including when discovering saved groups.
 
 ## Verified architecture
 
