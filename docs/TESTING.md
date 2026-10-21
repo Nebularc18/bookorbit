@@ -148,9 +148,9 @@ JUnit XML output for each suite is written to `test-results/server/<suite-id>-e2
 > **Timeout column** is the GitHub Actions job timeout, not a per-test vitest timeout.
 > Individual tests have no configured timeout and use vitest defaults.
 
-**Lanes:** The smoke lane (`guard-mechanics`) always runs on PRs. Full-lane suites run only
-when their `changedPaths` list in the registry matches the files changed in the PR. Nightly
-scheduled runs and manual dispatches always run all suites.
+**Lanes:** The smoke lane (`guard-mechanics`) runs on PRs when its registered paths or
+shared CI, dependency, or Docker inputs change. Full-lane suites run on nightly schedules
+and through the manual E2E workflow, which runs all suites.
 
 ### App harness
 
@@ -315,8 +315,9 @@ report artifacts are retained for 7 days.
 
 E2E suites are selected by `scripts/e2e/select-matrix.mjs`:
 
-- **Nightly schedule (`CI`):** All 18 suites run.
-- **Pull request / push to main / manual `CI` dispatch:** E2E is skipped in `.github/workflows/ci.yml`.
+- **Nightly schedule (`CI`):** All registered suites run.
+- **Pull request:** The permission-guard smoke suite runs for matching changed paths. Full suites stay nightly or manual.
+- **Push to main / manual `CI` dispatch:** E2E is skipped in `.github/workflows/ci.yml`.
 
 Each selected suite runs as its own GitHub Actions job via the reusable
 `.github/workflows/e2e-runner.yml` workflow, which spins up a PostgreSQL 18 + pgvector service

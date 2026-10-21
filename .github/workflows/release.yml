@@ -28,7 +28,7 @@ env:
 jobs:
   release-dry-run:
     name: Release Dry Run
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'bookorbit/bookorbit'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
