@@ -855,6 +855,13 @@
       "when": 1792262139337,
       "tag": "0121_household_works",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1792603846587,
+      "tag": "0122_upstream_schema_sync",
+      "breakpoints": true
     }
   ]
 }

@@ -110,6 +110,8 @@ Branch name requirements:
 - Use lowercase kebab-case for the description suffix
 - Example: `BO-123-fix-reader-sync`
 
+Downstream forks can import upstream history through `sync/upstream-main-YYYYMMDD` branches. For same-repository PRs authored by an owner, member, or collaborator, CI exempts these syncs from issue references, branch naming, and Crowdin-only translation restrictions. Title and commit checks, application checks, and image scanning still apply. Ordinary contributions and PRs targeting the upstream repository keep the rules above.
+
 ### Phase 6: Implement Your Change
 
 Start the dev server and get to work:
