@@ -202,10 +202,10 @@ function audiobookManifest(): AudiobookManifest {
   }
 }
 
-function serve(detail: BookDetail) {
+function serve(detail: BookDetail, manifest = audiobookManifest()) {
   mocks.api.mockImplementation(async (input) => {
     if (input === `/api/v1/books/${BOOK_ID}`) return { ok: true, json: async () => detail }
-    if (input === `/api/v1/audiobooks/${BOOK_ID}/manifest`) return { ok: true, json: async () => audiobookManifest() }
+    if (input === `/api/v1/audiobooks/${BOOK_ID}/manifest`) return { ok: true, json: async () => manifest }
     throw new Error(`Unexpected request: ${input}`)
   })
 }
@@ -270,6 +270,25 @@ describe('AudiobookReaderView', () => {
     wrapper = null
     vi.unstubAllGlobals()
     Reflect.deleteProperty(navigator, 'mediaSession')
+  })
+
+  it('shows the current chapter progress alongside the book scrubber', async () => {
+    serve(bookDetail())
+    const view = await mountView()
+
+    const chapterBar = view.get('[role="progressbar"]')
+    expect(chapterBar.attributes('aria-label')).toBe('Launch')
+    expect(chapterBar.attributes('aria-valuenow')).toBe('0')
+    expect(chapterBar.attributes('aria-valuetext')).toBe('reader.audiobook.timeLeft')
+    expect(view.find('.scrubber-rail').exists()).toBe(true)
+  })
+
+  it('keeps the book scrubber available when chapter data is missing', async () => {
+    serve(bookDetail(), { ...audiobookManifest(), chapters: [] })
+    const view = await mountView()
+
+    expect(view.find('[role="progressbar"]').exists()).toBe(false)
+    expect(view.find('.scrubber-rail').exists()).toBe(true)
   })
 
   it('draws the cover and backdrop from the audio slot, versioned by coverVersion', async () => {

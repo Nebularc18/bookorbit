@@ -36,6 +36,7 @@ import { createCoverFillArtworkUrl } from '@/features/book/lib/cover-fill-artwor
 import { useAudioProgress } from './composables/useAudioProgress'
 import { useAudioQueue } from './composables/useAudioQueue'
 import { useAudioSettings } from './composables/useAudioSettings'
+import { useAudioChapterProgress } from './composables/useAudioChapterProgress'
 import { useAudioBookmarks, type AudioBookmark } from './composables/useAudioBookmarks'
 import { useReadingSession } from '../shared/composables/useReadingSession'
 import { useFullscreen } from '../shared/composables/useFullscreen'
@@ -713,6 +714,8 @@ const currentChapter = computed<AudiobookManifestChapter | null>(() => {
   return current
 })
 
+const chapterProgress = useAudioChapterProgress(currentChapter, absolutePositionMs, settings.playbackSpeed)
+
 const scrubberHoverChapter = computed<AudiobookManifestChapter | null>(() => {
   if (scrubberHoverSeconds.value === null) return null
   const chapters = manifest.value?.chapters
@@ -926,9 +929,33 @@ onMounted(async () => {
             <p v-if="detail.authors.length" class="text-sm text-white/60 mt-0.5 truncate">
               {{ detail.authors.map((a) => a.name).join(', ') }}
             </p>
-            <p v-if="currentChapter" class="text-xs text-white/45 mt-1 truncate font-medium uppercase tracking-widest">
+            <p
+              v-if="currentChapter && !chapterProgress.visible.value"
+              class="text-xs text-white/45 mt-1 truncate font-medium uppercase tracking-widest"
+            >
               {{ currentChapter.title }}
             </p>
+          </div>
+
+          <div v-if="chapterProgress.visible.value" class="w-full max-w-sm">
+            <div class="flex items-center justify-between gap-3 text-xs mb-2">
+              <span class="min-w-0 truncate font-medium uppercase tracking-widest opacity-60">{{ currentChapter?.title }}</span>
+              <span class="shrink-0 tabular-nums opacity-60">{{
+                t('reader.audiobook.timeLeft', { time: formatTime(chapterProgress.remainingSeconds.value) })
+              }}</span>
+            </div>
+            <div
+              role="progressbar"
+              :aria-label="currentChapter?.title"
+              :aria-valuenow="chapterProgress.percentage.value"
+              :aria-valuemin="0"
+              :aria-valuemax="100"
+              :aria-valuetext="t('reader.audiobook.timeLeft', { time: formatTime(chapterProgress.remainingSeconds.value) })"
+              class="relative h-1 rounded-full overflow-hidden"
+            >
+              <div class="absolute inset-0 bg-current opacity-20" />
+              <div class="absolute inset-y-0 left-0 rounded-full bg-current" :style="{ width: chapterProgress.percentage.value + '%' }" />
+            </div>
           </div>
 
           <!-- Progress bar with chapter ticks, bookmark ticks, and hover tooltip -->
