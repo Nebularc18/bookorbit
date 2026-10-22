@@ -7,7 +7,7 @@ import BookReaderChoiceDialog from './BookReaderChoiceDialog.vue'
 
 // -- module mocks (must precede imports) -------------------------------------
 
-const mockApi = vi.hoisted(() => vi.fn())
+const mockApi = vi.hoisted(() => vi.fn<(url: string) => Promise<Pick<Response, 'ok' | 'json'>>>())
 vi.mock('@/lib/api', () => ({ api: mockApi }))
 
 const mockToastError = vi.hoisted(() => vi.fn<(message: string) => void>())

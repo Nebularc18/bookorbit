@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useBookReaderChoice } from '../useBookReaderChoice'
 import type { BookFileRef } from '@bookorbit/types'
+import type { RouteLocationRaw } from 'vue-router'
 
-const { push, api } = vi.hoisted(() => ({ push: vi.fn(), api: vi.fn() }))
+const { push, api } = vi.hoisted(() => ({
+  push: vi.fn<(location: RouteLocationRaw) => void>(),
+  api: vi.fn<(url: string) => Promise<Pick<Response, 'ok' | 'json'>>>(),
+}))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
 vi.mock('@/lib/api', () => ({ api }))
 
