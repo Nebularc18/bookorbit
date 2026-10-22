@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useBookReaderChoice } from '@/features/book/composables/useBookReaderChoice'
+import BookReaderChoiceDialog from '@/features/book/components/BookReaderChoiceDialog.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -12,6 +14,14 @@ import { bookFormatEntries, fileFormatKey, formatKeyName } from '@/features/book
 const props = defineProps<{
   book: BookCard
 }>()
+
+const {
+  choices: readerChoices,
+  choosing: choosingReader,
+  openBook: chooseReader,
+  openFile: openReaderChoice,
+  closeChoice: closeReaderChoice,
+} = useBookReaderChoice(() => props.book)
 
 const router = useRouter()
 const { t } = useI18n()
@@ -53,7 +63,7 @@ function openFile(file: BookFileRef | null, mode?: 'peek') {
 }
 
 function openPrimaryFile() {
-  openFile(primaryFile.value)
+  void chooseReader()
 }
 
 function peekPrimaryFile() {
@@ -63,6 +73,7 @@ function peekPrimaryFile() {
 
 <template>
   <div v-if="canOpen" class="flex w-full items-center justify-start">
+    <BookReaderChoiceDialog v-if="choosingReader" :files="readerChoices" @select="openReaderChoice" @close="closeReaderChoice" />
     <div v-if="hasMultipleFormats" class="mr-auto flex h-7 items-center overflow-hidden rounded-md">
       <button
         type="button"

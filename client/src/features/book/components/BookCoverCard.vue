@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useBookReaderChoice } from '@/features/book/composables/useBookReaderChoice'
+import BookReaderChoiceDialog from '@/features/book/components/BookReaderChoiceDialog.vue'
 import type { BookCard, BookFileRef, CoverAspectRatio } from '@bookorbit/types'
 import { getBookMediaProfile, isAudioFormat, READER_OPENABLE_FORMATS } from '@bookorbit/types'
 import BookFormatChip from './BookFormatChip.vue'
@@ -59,6 +61,14 @@ import { toast } from 'vue-sonner'
 const { t } = useI18n()
 
 const route = useRoute()
+const {
+  choices: readerChoices,
+  choosing: choosingReader,
+  openBook: chooseReader,
+  openFile: openReaderChoice,
+  closeChoice: closeReaderChoice,
+} = useBookReaderChoice(() => props.book)
+
 const router = useRouter()
 
 const props = defineProps<{
@@ -288,11 +298,11 @@ function handlePrimaryOverlayAction() {
     return
   }
 
-  if (primaryFile.value && !isMissing.value) openFile(primaryFile.value)
+  if (!isMissing.value) void chooseReader()
 }
 
 function openPrimaryFileExplicit() {
-  if (primaryFile.value && !isMissing.value) openFile(primaryFile.value)
+  if (!isMissing.value) void chooseReader()
 }
 
 function handleCardClick(event: MouseEvent) {
@@ -313,7 +323,7 @@ function handleCardClick(event: MouseEvent) {
     return
   }
 
-  if (primaryFile.value && !isMissing.value) openFile(primaryFile.value)
+  if (!isMissing.value) void chooseReader()
 }
 
 function handleClickOutside(event: MouseEvent) {
@@ -421,6 +431,7 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
     @click="handleCardClick"
     @contextmenu.prevent
   >
+    <BookReaderChoiceDialog v-if="choosingReader" :files="readerChoices" @select="openReaderChoice" @close="closeReaderChoice" />
     <!-- Cover -->
     <div class="group">
       <BookCoverSurface

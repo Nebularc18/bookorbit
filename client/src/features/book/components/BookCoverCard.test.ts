@@ -3,8 +3,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import type { BookCard } from '@bookorbit/types'
 import BookCoverCard from './BookCoverCard.vue'
+import BookReaderChoiceDialog from './BookReaderChoiceDialog.vue'
 
 // -- module mocks (must precede imports) -------------------------------------
+
+const mockApi = vi.hoisted(() => vi.fn<(url: string) => Promise<Pick<Response, 'ok' | 'json'>>>())
+vi.mock('@/lib/api', () => ({ api: mockApi }))
 
 const mockToastError = vi.hoisted(() => vi.fn<(message: string) => void>())
 vi.mock('vue-sonner', () => ({ toast: { error: mockToastError, success: vi.fn<(message: string) => void>() } }))
@@ -105,6 +109,7 @@ vi.mock('@/features/book/lib/book-cover', () => ({
 
 vi.mock('@/features/book/lib/format-colors', () => ({
   getFormatColor: () => '#4a90e2',
+  formatChipStyle: () => ({}),
 }))
 
 vi.mock('@/features/book/components/BookCoverPlaceholder.vue', () => ({
@@ -236,6 +241,7 @@ function setTouchMode(value: boolean) {
 describe('BookCoverCard', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockApi.mockResolvedValue({ ok: true, json: async () => [] })
     mockRefreshing.value = false
     mockCardOverlays.value = []
     mockBookCoverDisplayMode.value = 'blurred-fit'
@@ -316,6 +322,33 @@ describe('BookCoverCard', () => {
   // ── card click: desktop vs mobile ────────────────────────────────────────
 
   describe('card click behavior', () => {
+    it('asks for a version from the cover action and opens the selected audio version', async () => {
+      const files = [makeFile({ id: 10, format: 'epub', role: 'primary' }), makeFile({ id: 11, format: 'm4b', role: 'content' })]
+      const wrapper = mountCard({ book: makeBook({ files }) })
+      await wrapper.get('[data-testid="grid-card-primary-action"]').trigger('click')
+      await flushPromises()
+      expect(mockRouterPush).not.toHaveBeenCalled()
+      const dialog = wrapper.getComponent(BookReaderChoiceDialog)
+      expect(dialog.props('files').map((file) => file.id)).toEqual([10, 11])
+      dialog.vm.$emit('select', files[1]!)
+      expect(mockRouterPush).toHaveBeenCalledWith(expect.objectContaining({ params: { bookId: 1, fileId: 11 } }))
+      wrapper.unmount()
+    })
+
+    it('continues a saved version from the cover action without asking', async () => {
+      mockApi.mockImplementation(async (url: string) => ({
+        ok: true,
+        json: async () => (url.endsWith('/progress') ? [{ fileId: 11, percentage: 20, updatedAt: '2026-10-01' }] : null),
+      }))
+      const files = [makeFile({ id: 10, format: 'epub', role: 'primary' }), makeFile({ id: 11, format: 'pdf', role: 'content' })]
+      const wrapper = mountCard({ book: makeBook({ files }) })
+      await wrapper.get('[data-testid="grid-card-primary-action"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.findComponent(BookReaderChoiceDialog).exists()).toBe(false)
+      expect(mockRouterPush).toHaveBeenCalledWith(expect.objectContaining({ params: { bookId: 1, fileId: 11 } }))
+      wrapper.unmount()
+    })
+
     it('opens primary file on desktop click when primaryFile exists', async () => {
       setTouchMode(false)
       const book = makeBook({ files: [makeFile({ id: 10, format: 'epub', role: 'primary' })] })
