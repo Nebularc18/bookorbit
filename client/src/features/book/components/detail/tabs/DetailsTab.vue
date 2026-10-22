@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useBookReaderChoice } from '@/features/book/composables/useBookReaderChoice'
+import BookReaderChoiceDialog from '@/features/book/components/BookReaderChoiceDialog.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatDate as formatLocaleDate } from '@/i18n/formatters'
@@ -105,6 +107,14 @@ type SeriesDisplayLink = {
 const props = defineProps<{ book: BookDetail }>()
 const emit = defineEmits<{ saved: [BookDetail]; moved: [] }>()
 const { t } = useI18n()
+const {
+  choices: readerChoices,
+  choosing: choosingReader,
+  openBook: chooseReader,
+  openFile: openReaderChoice,
+  closeChoice: closeReaderChoice,
+} = useBookReaderChoice(() => props.book)
+
 const router = useRouter()
 const { user } = useAuth()
 
@@ -1063,7 +1073,7 @@ function openBookWithMode(mode?: 'peek') {
 }
 
 function openBook() {
-  openBookWithMode()
+  void chooseReader()
 }
 
 function peekBook() {
@@ -1221,6 +1231,7 @@ watch(
 </script>
 
 <template>
+  <BookReaderChoiceDialog v-if="choosingReader" :files="readerChoices" @select="openReaderChoice" @close="closeReaderChoice" />
   <div v-if="book.status === 'missing'" class="mb-6 flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3">
     <TriangleAlert class="size-4 text-amber-500 shrink-0 mt-0.5" />
     <div>
