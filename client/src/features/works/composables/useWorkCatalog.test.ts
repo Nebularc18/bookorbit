@@ -1,17 +1,82 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { apiJson } from '@/lib/api-json'
-import type { WorkCatalogPage } from '@bookorbit/types'
+import { apiJson, apiSend } from '@/lib/api-json'
+import type { WorkCatalogItem, WorkCatalogPage } from '@bookorbit/types'
 import { useWorkCatalog } from './useWorkCatalog'
+const demoRestricted = vi.hoisted(() => ({ value: false }))
+vi.mock('@/features/auth/composables/usePermissions', () => ({ usePermissions: () => ({ isDemoRestrictedAccount: demoRestricted }) }))
 const permission = vi.hoisted(() => vi.fn<() => boolean>(() => true))
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: { libraryId: '7' } }) }))
 vi.mock('@/features/library/composables/useLibraryPermissions', () => ({ useLibraryPermissions: () => ({ hasLibraryPermission: permission }) }))
-vi.mock('@/lib/api-json', async (original) => ({ ...(await original<typeof import('@/lib/api-json')>()), apiJson: vi.fn<typeof apiJson>() }))
+vi.mock('@/lib/api-json', async (original) => ({
+  ...(await original<typeof import('@/lib/api-json')>()),
+  apiJson: vi.fn<typeof apiJson>(),
+  apiSend: vi.fn<typeof apiSend>(),
+}))
 
 describe('work catalog request and reader contracts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    demoRestricted.value = false
     permission.mockReturnValue(true)
     vi.mocked(apiJson).mockResolvedValue({ items: [], hasMore: false })
+  })
+  const translatedWork: WorkCatalogItem = {
+    key: 'w:9',
+    workId: 9,
+    title: 'Sample',
+    editions: [
+      { bookId: 1, title: 'Sample', language: 'en', narrators: [], files: [] },
+      { bookId: 2, title: 'Translation', language: 'sv', narrators: [], files: [] },
+    ],
+  }
+  it('marks both displayed translations read through the existing account-scoped bulk route', async () => {
+    permission.mockReturnValue(false)
+    const catalog = useWorkCatalog()
+    await catalog.markEditionsRead(translatedWork)
+    expect(apiSend).toHaveBeenCalledWith(
+      '/api/v1/books/bulk-set-status',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookIds: [1, 2], status: 'read' }),
+      }),
+      'common.error',
+    )
+    expect(catalog.editionsMarkedRead(translatedWork)).toBe(true)
+    expect(catalog.busy.value).toBe(false)
+  })
+  it('reports a failed update without claiming the translations were marked read', async () => {
+    const catalog = useWorkCatalog()
+    vi.mocked(apiSend).mockRejectedValueOnce(new Error('Update failed'))
+    await catalog.markEditionsRead(translatedWork)
+    expect(catalog.error.value).toBe('Update failed')
+    expect(catalog.editionsMarkedRead(translatedWork)).toBe(false)
+    expect(catalog.busy.value).toBe(false)
+  })
+  it('blocks demo-restricted and overlapping bulk updates', async () => {
+    const catalog = useWorkCatalog()
+    demoRestricted.value = true
+    expect(catalog.canMarkRead.value).toBe(false)
+    await catalog.markEditionsRead(translatedWork)
+    demoRestricted.value = false
+    const busyCatalog = useWorkCatalog()
+    busyCatalog.busy.value = true
+    await busyCatalog.markEditionsRead(translatedWork)
+    expect(apiSend).not.toHaveBeenCalled()
+  })
+  it('only marks displayed editions when a group is filtered or truncated', async () => {
+    const catalog = useWorkCatalog()
+    await catalog.markEditionsRead({ ...translatedWork, hasMoreEditions: true, editions: [translatedWork.editions[0]!] })
+    expect(apiSend).toHaveBeenCalledWith(
+      '/api/v1/books/bulk-set-status',
+      expect.objectContaining({
+        body: JSON.stringify({ bookIds: [1], status: 'read' }),
+      }),
+      'common.error',
+    )
+    expect(catalog.editionsMarkedRead(translatedWork)).toBe(false)
+    await catalog.filter()
+    expect(catalog.editionsMarkedRead({ ...translatedWork, editions: [translatedWork.editions[0]!] })).toBe(false)
   })
   it('sends both filters to the matching backend route', async () => {
     const catalog = useWorkCatalog()

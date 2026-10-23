@@ -2,7 +2,12 @@
   "works": {
     "title": "Grouped books",
     "backToLibrary": "Back to library",
-    "description": "See a book's ebook and audiobook editions together. Files, positions, ratings and history stay with each edition and account.",
+    "description": "Group editions of the same book, including translations. When you mark one edition as read, you can also mark the linked editions as read. Each edition keeps its own reading history.",
+    "offerRead": "Mark these {count} other linked editions as read too?",
+    "markOtherEditionsRead": "Mark as read too",
+    "markReadFailed": "Could not mark the other editions as read. Try again from Grouped books.",
+    "markEditionsRead": "Mark these {count} editions as read",
+    "editionsMarkedRead": "These editions are now marked as read for your account.",
     "automaticGrouping": "Automatically group matching editions",
     "automaticHint": "Matches use the same title, authors and language, ignoring capitalization and a trailing publication year. New matching editions appear together here after scanning. Missing metadata needs manual grouping. Turn this off to see automatic matches separately.",
     "language": "Language",

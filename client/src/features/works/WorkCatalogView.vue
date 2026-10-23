@@ -17,6 +17,9 @@ const {
   error,
   busy,
   canGroup,
+  canMarkRead,
+  markEditionsRead,
+  editionsMarkedRead,
   canSubmitGroup,
   load,
   filter,
@@ -70,6 +73,15 @@ onMounted(load)
     <article v-for="work in page.items" :key="work.key" class="space-y-3 rounded border border-border bg-card p-4">
       <h2 class="text-xl font-semibold">{{ work.title }}</h2>
       <p v-if="work.automaticallyGrouped" class="text-sm text-muted-foreground">{{ t('works.automaticMatch') }}</p>
+      <button
+        v-if="canMarkRead && work.editions.length"
+        :disabled="busy || editionsMarkedRead(work)"
+        class="rounded border border-border px-3 py-2 text-sm disabled:opacity-50"
+        @click="markEditionsRead(work)"
+      >
+        {{ t('works.markEditionsRead', { count: work.editions.length }) }}
+      </button>
+      <p v-if="editionsMarkedRead(work)" role="status" class="text-sm text-muted-foreground">{{ t('works.editionsMarkedRead') }}</p>
       <ul class="space-y-3">
         <li v-for="edition in work.editions" :key="edition.bookId" class="flex flex-wrap items-center gap-3">
           <label v-if="canGroup && !edition.savedWorkId" class="flex items-center gap-2 text-sm">

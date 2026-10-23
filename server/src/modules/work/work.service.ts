@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { WorkCatalogPage } from '@bookorbit/types';
+import { Permission, type LinkedUnreadEditions, type WorkCatalogPage } from '@bookorbit/types';
 import { WorkRepository } from './work.repository';
 import type { RequestUser } from '../../common/types/request-user';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
@@ -26,6 +26,20 @@ export class WorkService {
       contentFilters: user.isSuperuser ? undefined : user.contentFilters,
     });
     return this.repository.catalog(query, visible);
+  }
+
+  async linkedUnreadEditions(bookId: number, user: RequestUser): Promise<LinkedUnreadEditions> {
+    await this.bookService.verifyBookAccess(bookId, user);
+    if (user.permissions?.includes(Permission.DemoRestricted)) return { bookIds: [] };
+    const edition = await this.repository.findEditionWork(bookId);
+    if (!edition?.workId) return { bookIds: [] };
+    const visible = this.queryBuilder.buildWhere(null, {
+      accessibleLibraryIds: [edition.libraryId],
+      userId: user.id,
+      contentFilters: user.isSuperuser ? undefined : user.contentFilters,
+    });
+    const editions = await this.repository.findUnreadEditions(edition.workId, bookId, user.id, visible);
+    return { bookIds: editions.map((row) => row.bookId) };
   }
 
   async group(dto: GroupWorkDto, user: RequestUser) {

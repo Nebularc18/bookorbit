@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { api } from '@/lib/api'
+import { offerLinkedEditionsRead } from './offerLinkedEditionsRead'
 import type { BookCard, CustomMetadataBookValue, ReadStatus } from '@bookorbit/types'
 import type { ColumnId } from './tableColumnSchema'
 import { COLUMN_DEF_MAP, isCustomColumnId, parseCustomFieldId } from './tableColumnSchema'
@@ -101,6 +102,7 @@ export function useTableCellEditor() {
           updatedReadStatus = { status, source: 'manual', startedAt: null, finishedAt: null, updatedAt: new Date().toISOString() }
         }
         onSuccess({ readStatus: updatedReadStatus })
+        if (status === 'read' && updatedReadStatus?.status === 'read') void offerLinkedEditionsRead(bookId)
       } else if (isCustomColumnId(columnId)) {
         const fieldId = parseCustomFieldId(columnId)
         if (fieldId === null) {
