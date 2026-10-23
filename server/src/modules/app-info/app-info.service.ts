@@ -81,7 +81,9 @@ export class AppInfoService implements OnApplicationBootstrap {
 
       let response: Response;
       try {
-        response = await fetch(GITHUB_RELEASES_API, {
+        const repo = this.config.get<string>('app.githubReleasesRepo');
+        const url = repo ? `https://api.github.com/repos/${repo}/releases/latest` : GITHUB_RELEASES_API;
+        response = await fetch(url, {
           headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
           signal: controller.signal,
         });
@@ -134,9 +136,10 @@ export class AppInfoService implements OnApplicationBootstrap {
   }
 
   private isNewer(latestTag: string, currentVersion: string): boolean {
-    const latest = this.parseSemver(latestTag.replace(/^v/, ''));
-    const current = this.parseSemver(currentVersion.replace(/^v/, ''));
+    const latest = this.parseSemver(latestTag.replace(/^(?:nebularc-)?v/, ''));
+    const current = this.parseSemver(currentVersion.replace(/^(?:nebularc-)?v/, ''));
     if (!latest || !current) return false;
+    if (latestTag.startsWith('nebularc-') !== currentVersion.startsWith('nebularc-')) return latestTag.startsWith('nebularc-');
     if (latest[0] !== current[0]) return latest[0] > current[0];
     if (latest[1] !== current[1]) return latest[1] > current[1];
     return latest[2] > current[2];

@@ -28,7 +28,7 @@ env:
 jobs:
   release-dry-run:
     name: Release Dry Run
-    if: github.event_name == 'pull_request' && github.repository == 'bookorbit/bookorbit'
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -68,6 +68,7 @@ jobs:
       published: ${{ steps.semantic.outputs.new_release_published }}
       version: ${{ steps.semantic.outputs.new_release_version }}
       tag: ${{ steps.semantic.outputs.new_release_git_tag }}
+      image_name: ${{ steps.image.outputs.image_name }}
     steps:
       - name: Guard against non-main branch
         shell: bash
@@ -114,12 +115,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify SHA image exists in GHCR
+        id: image
         shell: bash
         env:
           COMMIT_SHA: ${{ github.sha }}
           IMAGE_NAME: ${{ github.repository }}
         run: |
           set -euo pipefail
+          IMAGE_NAME="${IMAGE_NAME,,}"
+          echo "image_name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
           SHORT_SHA="${COMMIT_SHA:0:12}"
           SOURCE_TAG="ghcr.io/${IMAGE_NAME}:sha-${SHORT_SHA}"
           if ! docker buildx imagetools inspect "${SOURCE_TAG}" > /dev/null 2>&1; then
@@ -141,12 +145,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          BEFORE_TAG=$(git tag --sort=-v:refname | head -1 || true)
+          BEFORE_TAG=$(git tag --list 'nebularc-v[0-9]*' --points-at HEAD --sort=-version:refname | sed -n '1p')
           pnpm exec semantic-release
           git fetch --tags --quiet
-          AFTER_TAG=$(git tag --sort=-v:refname | head -1 || true)
+          AFTER_TAG=$(git tag --list 'nebularc-v[0-9]*' --points-at HEAD --sort=-version:refname | sed -n '1p')
           if [[ -n "$AFTER_TAG" && "$AFTER_TAG" != "$BEFORE_TAG" ]]; then
-            VERSION="${AFTER_TAG#v}"
+            VERSION="${AFTER_TAG#nebularc-v}"
             echo "new_release_published=true" >> "$GITHUB_OUTPUT"
             echo "new_release_version=${VERSION}" >> "$GITHUB_OUTPUT"
             echo "new_release_git_tag=${AFTER_TAG}" >> "$GITHUB_OUTPUT"
@@ -177,7 +181,7 @@ jobs:
       packages: write
     env:
       REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ github.repository }}
+      IMAGE_NAME: ${{ needs.release.outputs.image_name }}
     steps:
       - name: Checkout release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -208,7 +212,7 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.release.outputs.version }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          build-args: APP_VERSION=v${{ needs.release.outputs.version }}
+          build-args: APP_VERSION=${{ needs.release.outputs.tag }}
           cache-from: |
             type=gha,scope=container-image-yml-amd64
             type=gha,scope=container-image-yml-arm64
@@ -240,7 +244,7 @@ jobs:
             --limit 100 \
             --json tagName \
             --jq '.[].tagName' \
-            | awk -v current="${TAG}" '$0 != current {print; exit}')
+            | awk -v current="${TAG}" '$0 ~ /^nebularc-v[0-9]+\.[0-9]+\.[0-9]+$/ && $0 != current {print; exit}')
 
           {
             echo ""
@@ -259,9 +263,10 @@ jobs:
         env:
           VERSION: ${{ needs.release.outputs.version }}
           SHA: ${{ github.sha }}
+          TAG: ${{ needs.release.outputs.tag }}
         run: |
           echo "## Docker Image Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Version:** \`${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Tags:** \`${VERSION}\`, \`latest\` (linux/amd64, linux/arm64)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **APP_VERSION baked:** \`v${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **APP_VERSION baked:** \`${TAG}\`" >> "$GITHUB_STEP_SUMMARY"

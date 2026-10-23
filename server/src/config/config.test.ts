@@ -67,7 +67,7 @@ describe('config', () => {
       appUrl: 'http://localhost:6263',
       nativeRedirectUri: 'bookorbit://oauth2-callback',
       version: 'Local build',
-      githubReleasesRepo: 'bookorbit/bookorbit',
+      githubReleasesRepo: 'Nebularc18/bookorbit',
       githubReleasesToken: undefined,
       oidcAllowLocalIssuers: false,
       swaggerEnabled: false,

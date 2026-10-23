@@ -7,11 +7,11 @@ export type SidebarVersionUi = {
   updateHref: string
 }
 
-const GITHUB_RELEASES_BASE = 'https://github.com/bookorbit/bookorbit/releases'
-const GITHUB_COMMIT_BASE = 'https://github.com/bookorbit/bookorbit/commit'
+const GITHUB_RELEASES_BASE = 'https://github.com/Nebularc18/bookorbit/releases'
+const GITHUB_COMMIT_BASE = 'https://github.com/Nebularc18/bookorbit/commit'
 
 function isVersionTag(value: string): boolean {
-  return /^v\d+\.\d+\.\d+$/.test(value)
+  return /^(?:nebularc-)?v\d+\.\d+\.\d+$/.test(value)
 }
 
 function extractSha(value: string): string | null {
