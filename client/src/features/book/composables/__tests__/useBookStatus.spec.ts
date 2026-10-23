@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => ({ api: mocks.api }))
 
-vi.mock('../offerLinkedEditionsRead', () => ({ offerLinkedEditionsRead: vi.fn() }))
+vi.mock('../offerLinkedEditionsRead', () => ({ offerLinkedEditionsRead: vi.fn<typeof offerLinkedEditionsRead>() }))
 import { offerLinkedEditionsRead } from '../offerLinkedEditionsRead'
 
 import { ReadStatusUpdateError, useBookStatus } from '../useBookStatus'

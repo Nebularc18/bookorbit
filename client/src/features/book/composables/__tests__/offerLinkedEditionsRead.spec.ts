@@ -4,14 +4,16 @@ import { toast } from 'vue-sonner'
 import { notifyBookReadingStateChanged } from '../useBookProgressRefresh'
 import { offerLinkedEditionsRead } from '../offerLinkedEditionsRead'
 
-vi.mock('../useBookProgressRefresh', () => ({ notifyBookReadingStateChanged: vi.fn() }))
+vi.mock('../useBookProgressRefresh', () => ({ notifyBookReadingStateChanged: vi.fn<typeof notifyBookReadingStateChanged>() }))
 
 vi.mock('@/lib/api-json', async (original) => ({
   ...(await original<typeof import('@/lib/api-json')>()),
-  apiJson: vi.fn(),
-  apiSend: vi.fn(),
+  apiJson: vi.fn<typeof apiJson>(),
+  apiSend: vi.fn<typeof apiSend>(),
 }))
-vi.mock('vue-sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
+vi.mock('vue-sonner', () => ({
+  toast: Object.assign(vi.fn<typeof toast>(), { success: vi.fn<typeof toast.success>(), error: vi.fn<typeof toast.error>() }),
+}))
 
 describe('linked edition read offer', () => {
   beforeEach(() => {
