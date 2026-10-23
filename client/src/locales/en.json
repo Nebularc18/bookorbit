@@ -3792,7 +3792,7 @@
             "torznabTitle": "Add a Torznab indexer",
             "torznabBody": "Point at a Prowlarr, Jackett or NZBHydra feed you already run. One per feed.",
             "builtInTitle": "Add an indexer",
-            "builtInBody": "Point at a Torznab or Newznab feed you already use. One configuration per feed."
+            "builtInBody": "Connect Shelfmark or a Torznab or Newznab feed you already use. Configure each source once."
           },
           "add": "Add indexer",
           "edit": "Edit indexer",
@@ -3835,7 +3835,8 @@
           },
           "types": {
             "torznab": "Torznab (Jackett, Prowlarr, NZBHydra)",
-            "newznab": "Newznab"
+            "newznab": "Newznab",
+            "shelfmark": "Shelfmark"
           },
           "fields": {
             "name": "Name",
@@ -3843,7 +3844,8 @@
             "baseUrl": "Base URL",
             "baseUrlHint": {
               "torznab": "The Torznab feed URL, without the query string. Jackett shows it on each indexer as \"Torznab Feed\".",
-              "newznab": "The Newznab site URL or API endpoint, without a search query."
+              "newznab": "The Newznab site URL or API endpoint, without a search query.",
+              "shelfmark": "Your Shelfmark address, for example http://shelfmark:8084. Set SHELFMARK_API_KEY in Shelfmark and enter that key below. Enable private addresses for a local instance. Finished files are copied into BookOrbit automatically."
             },
             "credential": {
               "apiKey": "API key",
@@ -3939,7 +3941,8 @@
           "plugin": "Plugin",
           "typeDescriptions": {
             "torznab": "Your own Jackett, Prowlarr or NZBHydra. Uses categories and seed goals.",
-            "newznab": "A Newznab-compatible Usenet indexer. Uses categories and requires an API key."
+            "newznab": "A Newznab-compatible Usenet indexer. Uses categories and requires an API key.",
+            "shelfmark": "Search and download through your Shelfmark instance. No separate download client or shared folder is needed in BookOrbit."
           },
           "plugins": {
             "title": "Plugins",
@@ -8640,6 +8643,7 @@
         "contentsUnknown": "This release is packaged as an archive (RAR, ZIP or 7z). BookOrbit will extract it after downloading, so its contents are not known yet.",
         "multipleBooks": "This release contains {count} separate books. After it downloads you will be asked which one to import.",
         "multiPartBook": "{count, plural, one {This release is one book made of # file.} other {This release is one book made of # files, imported together as a single book.}}",
+        "shelfmarkMetadataUnavailable": "Shelfmark manages this download. BookOrbit will inspect its files after copying the completed download.",
         "metadataUnavailable": "This is a magnet link. Its file list is unavailable until a torrent client fetches the metadata from the swarm.",
         "usenetMetadataUnavailable": "This is a Usenet release. Its final file list is unavailable until NZBGet downloads and post-processes it.",
         "bookFile": "Book file",
@@ -8759,7 +8763,8 @@
         "usenet": "Usenet",
         "direct": "Direct download",
         "directPill": "Direct"
-      }
+      },
+      "downloadWithShelfmark": "Download with Shelfmark"
     },
     "seed": {
       "title": "Download client",

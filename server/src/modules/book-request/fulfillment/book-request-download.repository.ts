@@ -150,7 +150,7 @@ export class BookRequestDownloadRepository {
       .where(
         and(
           inArray(bookRequestDownloads.status, [...ACTIVE_BOOK_REQUEST_DOWNLOAD_STATUSES]),
-          or(eq(bookRequestDownloads.source, 'direct_url'), isNotNull(bookRequestDownloads.downloadClientId)),
+          or(inArray(bookRequestDownloads.source, ['direct_url', 'shelfmark']), isNotNull(bookRequestDownloads.downloadClientId)),
         ),
       );
   }
@@ -314,7 +314,7 @@ export class BookRequestDownloadRepository {
       .from(bookRequestDownloads)
       .where(
         and(
-          eq(bookRequestDownloads.source, 'direct_url'),
+          inArray(bookRequestDownloads.source, ['direct_url', 'shelfmark']),
           isNotNull(bookRequestDownloads.clientKey),
           inArray(bookRequestDownloads.status, [...UNSETTLED_BOOK_REQUEST_DOWNLOAD_STATUSES]),
         ),

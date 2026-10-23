@@ -200,10 +200,10 @@ describe('RequestImportService.importDownload', () => {
     expect(await readFile(dest, 'utf8')).toBe('book');
   });
 
-  it('cleans direct-download staging after the Book Dock copy is safely in place', async () => {
+  it.each(['direct_url', 'shelfmark'])('cleans %s staging after the Book Dock copy is safely in place', async (sourceType) => {
     const harness = await makeHarness();
     const source = await makeFile(join(harness.directDownloadsPath, 'abc123'), 'dune.epub');
-    const direct = download(source, { source: 'direct_url' });
+    const direct = download(source, { source: sourceType });
 
     await harness.service.importDownload(direct);
 
@@ -816,11 +816,11 @@ describe('RequestImportService containment', () => {
   });
 
   /** A direct fetch has no client and no mapping, so its staging directory is its own root. */
-  it('refuses a direct download that reports a path outside the staging root', async () => {
+  it.each(['direct_url', 'shelfmark'])('refuses a %s download that reports a path outside the staging root', async (sourceType) => {
     const harness = await makeHarness();
     const outside = await makeFile(join(harness.appDataPath, '..', 'elsewhere'), 'secret.epub');
 
-    await expect(harness.service.importDownload(download(outside, { source: 'direct_url' }))).resolves.toBe(false);
+    await expect(harness.service.importDownload(download(outside, { source: sourceType }))).resolves.toBe(false);
 
     expect(await readdir(harness.bookDockPath)).toEqual([]);
     expect(harness.fulfillment.failDownload).toHaveBeenCalledWith(

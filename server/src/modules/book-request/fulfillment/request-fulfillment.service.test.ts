@@ -105,6 +105,7 @@ function makeService(
   };
   const gateway = { emitChanged: vi.fn(), emitProgress: vi.fn() };
   const events = { emit: vi.fn() };
+  const shelfmark = { add: vi.fn().mockResolvedValue(undefined) };
 
   const service = new RequestFulfillmentService(
     requests as never,
@@ -118,10 +119,12 @@ function makeService(
     notifier as never,
     gateway as never,
     events as never,
+    shelfmark as never,
   );
 
   return {
     service,
+    shelfmark,
     requests,
     downloads,
     clients,
@@ -139,6 +142,37 @@ function makeService(
 }
 
 describe('RequestFulfillmentService.grab', () => {
+  it('queues a Shelfmark release only after persisting its identity, without an external client', async () => {
+    const release = {
+      indexerId: 3,
+      guid: 'shelfmark-release',
+      title: 'Dune',
+      sizeBytes: 1000,
+      seeders: null,
+      leechers: null,
+      format: 'epub',
+      shelfmark: { source: 'direct_download', source_id: 'remote-book', title: 'Dune', format: 'epub' },
+    };
+    const { service, downloads, shelfmark, clients, direct } = makeService({
+      indexers: { resolveConfig: vi.fn().mockResolvedValue({ id: 3, adapterType: 'shelfmark', name: 'Shelfmark' }) },
+      releases: { find: vi.fn().mockReturnValue(release) },
+    });
+    await service.inspectRelease(7, { indexerId: 3, releaseGuid: release.guid });
+    expect(shelfmark.add).not.toHaveBeenCalled();
+    await service.grab(7, { indexerId: 3, releaseGuid: release.guid }, user());
+    expect(downloads.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'shelfmark',
+        downloadClientId: null,
+        remoteDownload: { source: 'direct_download', sourceId: 'remote-book' },
+      }),
+    );
+    expect(downloads.create.mock.invocationCallOrder[0]).toBeLessThan(shelfmark.add.mock.invocationCallOrder[0]);
+    expect(shelfmark.add).toHaveBeenCalledWith(3, release.shelfmark);
+    expect(clients.findPreferredEnabled).not.toHaveBeenCalled();
+    expect(direct.add).not.toHaveBeenCalled();
+  });
+
   it('records the attempt before calling the client, so an add never outlives its row', async () => {
     const { service, downloads, adapter } = makeService();
 

@@ -1,3 +1,4 @@
+import { ShelfmarkDownloadService } from './shelfmark-download.service';
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ACTIVE_BOOK_REQUEST_DOWNLOAD_STATUSES } from '@bookorbit/types';
 import type { BookRequestDownloadStatus, BookRequestStatus } from '@bookorbit/types';
@@ -60,7 +61,7 @@ const DOWNLOADING_FROM: readonly BookRequestStatus[] = ['grabbed', 'downloading'
 
 /** A client id, or the built-in downloader, which has no id because it has no row. */
 const DIRECT = 'direct' as const;
-type PollTarget = number | typeof DIRECT;
+type PollTarget = number | typeof DIRECT | `shelfmark:${number}`;
 
 @Injectable()
 export class DownloadMonitorService implements OnModuleDestroy {
@@ -86,6 +87,7 @@ export class DownloadMonitorService implements OnModuleDestroy {
     private readonly imports: RequestImportService,
     private readonly fulfillment: RequestFulfillmentService,
     private readonly gateway: BookRequestGateway,
+    private readonly shelfmark: ShelfmarkDownloadService,
   ) {}
 
   onModuleDestroy(): void {
@@ -230,6 +232,8 @@ export class DownloadMonitorService implements OnModuleDestroy {
     try {
       if (target === DIRECT) {
         statuses = await this.direct.status(clientKeys);
+      } else if (typeof target === 'string') {
+        statuses = await this.shelfmark.status(Number(target.slice('shelfmark:'.length)), polled);
       } else {
         const config = await this.clients.resolveConfig(target);
         const adapter = this.registry.require(config.adapterType);
@@ -315,7 +319,7 @@ export class DownloadMonitorService implements OnModuleDestroy {
       downloadedBytes: status.downloadedBytes,
       totalBytes: status.totalBytes,
       contentPath: status.contentPath ?? row.contentPath,
-      ...(movedBytes ? { lastProgressAt: new Date() } : {}),
+      ...(movedBytes || (row.source === 'shelfmark' && status.progressPercent > row.progressPercent) ? { lastProgressAt: new Date() } : {}),
       ...(status.state === 'completed' ? { completedAt: row.completedAt ?? new Date() } : {}),
       ...(row.source === 'direct_url' && status.state === 'completed' ? { directUrl: null, directEtag: null, directLastModified: null } : {}),
     });
@@ -350,6 +354,7 @@ export class DownloadMonitorService implements OnModuleDestroy {
  * watchdog is what eventually gives up on it.
  */
 function pollTargetFor(row: BookRequestDownloadRow): PollTarget | null {
+  if (row.source === 'shelfmark') return row.indexerId === null ? null : `shelfmark:${row.indexerId}`;
   return row.source === 'direct_url' ? DIRECT : row.downloadClientId;
 }
 

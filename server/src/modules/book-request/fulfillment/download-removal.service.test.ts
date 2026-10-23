@@ -36,8 +36,9 @@ function makeService(options: { latest?: BookRequestDownloadRow | null; removeEr
     remove: options.removeError ? vi.fn().mockRejectedValue(options.removeError) : vi.fn().mockResolvedValue(undefined),
   };
 
-  const service = new DownloadRemovalService(downloads as never, clients as never, registry as never, direct as never);
-  return { service, downloads, clients, adapter, registry, direct };
+  const shelfmark = { remove: vi.fn().mockResolvedValue(undefined) };
+  const service = new DownloadRemovalService(downloads as never, clients as never, registry as never, direct as never, shelfmark as never);
+  return { service, downloads, clients, adapter, registry, direct, shelfmark };
 }
 
 describe('DownloadRemovalService.removeLatestForRequest', () => {
@@ -70,6 +71,22 @@ describe('DownloadRemovalService.removeLatestForRequest', () => {
 
     expect(direct.remove).toHaveBeenCalledWith(INFO_HASH, { deleteFiles: true });
     expect(clients.resolveConfig).not.toHaveBeenCalled();
+  });
+
+  it('cancels a Shelfmark attempt through its source', async () => {
+    const item = download({ source: 'shelfmark', downloadClientId: null });
+    const { service, shelfmark, clients } = makeService({ latest: item });
+    await service.removeLatestForRequest(7, false, 'ann');
+    expect(shelfmark.remove).toHaveBeenCalledWith(item);
+    expect(clients.resolveConfig).not.toHaveBeenCalled();
+  });
+
+  it('cleans only the local Shelfmark copy after import', async () => {
+    const item = download({ source: 'shelfmark', downloadClientId: null, status: 'imported' });
+    const { service, shelfmark, direct } = makeService({ latest: item });
+    await service.cleanupStagedDirectDownload(item);
+    expect(direct.remove).toHaveBeenCalledWith(INFO_HASH, { deleteFiles: true });
+    expect(shelfmark.remove).not.toHaveBeenCalled();
   });
 
   it('reports nothing to remove for a request that was never grabbed', async () => {

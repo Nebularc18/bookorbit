@@ -379,6 +379,16 @@ describe('scoreRelease', () => {
 });
 
 describe('toReleaseItem', () => {
+  it('identifies the Shelfmark gateway without exposing the remote download payload', () => {
+    const candidate = release({
+      shelfmark: { source: 'example', source_id: 'private-release', title: 'Dune', extra: { privateToken: 'never-public' } },
+    });
+    const item = toReleaseItem(scoreRelease(candidate, request()), 'Shelfmark', request());
+    expect(item.gateway).toBe('shelfmark');
+    expect(item).not.toHaveProperty('shelfmark');
+    expect(JSON.stringify(item)).not.toContain('never-public');
+  });
+
   /**
    * MyAnonaMouse publishes `filetypes` alphabetically, so leading with the indexer's first token
    * labelled a release holding the requested epub as an AZW3, and faceting on that one value hid

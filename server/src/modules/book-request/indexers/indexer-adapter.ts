@@ -1,3 +1,4 @@
+import type { ShelfmarkRelease } from './adapters/shelfmark.types';
 import type {
   BookRequestMediaKind,
   IndexerSettingsField,
@@ -78,6 +79,7 @@ export interface ReleaseQuery {
  * differ wildly in what they expose, and scoring has to degrade rather than reject a sparse row.
  */
 export interface ReleaseCandidate {
+  shelfmark?: ShelfmarkRelease;
   indexerId: number;
   /** Stable within an indexer, and how a grab names the release it wants. */
   guid: string;

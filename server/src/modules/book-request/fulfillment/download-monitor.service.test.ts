@@ -84,6 +84,7 @@ function makeService(
   const direct = {
     status: options.statusError ? vi.fn().mockRejectedValue(options.statusError) : vi.fn().mockResolvedValue(options.statuses ?? [status()]),
   };
+  const shelfmark = { status: vi.fn().mockResolvedValue(options.statuses ?? [status()]) };
   const imports = { importDownload: vi.fn().mockResolvedValue(true) };
   const fulfillment = { failDownload: vi.fn().mockResolvedValue(undefined) };
   const gateway = { emitProgress: vi.fn(), emitChanged: vi.fn() };
@@ -97,9 +98,10 @@ function makeService(
     imports as never,
     fulfillment as never,
     gateway as never,
+    shelfmark as never,
   );
 
-  return { service, downloads, requests, clients, adapter, direct, imports, fulfillment, gateway };
+  return { service, downloads, requests, clients, adapter, direct, imports, fulfillment, gateway, shelfmark };
 }
 
 /**
@@ -638,5 +640,18 @@ describe('DownloadMonitorService.tick', () => {
 
       expect(fulfillment.failDownload).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('Shelfmark monitoring', () => {
+  it('polls Shelfmark sources through their own target and imports only the staged completion', async () => {
+    const download = row({ source: 'shelfmark', downloadClientId: null, indexerId: 3 });
+    const context = makeService({ active: [download], statuses: [status({ state: 'completed', progressPercent: 100 })] });
+    await context.service.tick();
+    await context.service.whenPollsSettle();
+    expect(context.shelfmark.status).toHaveBeenCalledWith(3, [download]);
+    expect(context.clients.resolveConfig).not.toHaveBeenCalled();
+    expect(context.direct.status).not.toHaveBeenCalled();
+    expect(context.downloads.updateIf).toHaveBeenCalledWith(download.id, expect.anything(), expect.objectContaining({ status: 'completed' }));
   });
 });

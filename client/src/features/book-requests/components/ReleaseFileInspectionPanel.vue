@@ -64,9 +64,11 @@ function summary(): string {
       return t('bookRequests.releases.manifest.multipleBooks', { count: inspection.unitCount })
     case 'metadata_unavailable':
       return t(
-        inspection.source === 'nzb_file'
-          ? 'bookRequests.releases.manifest.usenetMetadataUnavailable'
-          : 'bookRequests.releases.manifest.metadataUnavailable',
+        inspection.source === 'shelfmark'
+          ? 'bookRequests.releases.manifest.shelfmarkMetadataUnavailable'
+          : inspection.source === 'nzb_file'
+            ? 'bookRequests.releases.manifest.usenetMetadataUnavailable'
+            : 'bookRequests.releases.manifest.metadataUnavailable',
       )
   }
 }

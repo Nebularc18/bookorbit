@@ -4,9 +4,9 @@ import { extname, join, resolve, sep } from 'node:path';
 
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
-import { BOOK_FORMATS } from '@bookorbit/types';
+import { BOOK_FORMATS, type NetworkProfile } from '@bookorbit/types';
 
 import { storageConfig } from '../../../config/config';
 import { sanitizeLogValue } from '../../../common/utils/log-sanitize.utils';
@@ -92,9 +92,9 @@ const HTML_CONTENT_TYPE = /^text\/html\b/i;
 const USER_AGENT = 'BookOrbit';
 
 /**
- * A release URL comes from an indexer, which is the one thing on this path that is never trusted,
- * so a direct fetch never reaches the private network. Torrent clients get a per-row opt-in
- * because they live on the LAN; there is no equivalent reason for a file to.
+ * Untrusted release URLs cannot reach the private network. Authenticated gateway transfers use
+ * the operator's explicit private-address policy and refuse redirects to keep credentials on
+ * the configured gateway.
  */
 const ALLOW_PRIVATE = false;
 
@@ -108,7 +108,14 @@ interface Progress {
   terminalAt?: number;
 }
 
+export interface AuthenticatedDownloadAccess {
+  allowPrivateAddress: boolean;
+  headers: Record<string, string>;
+  networkProfile: NetworkProfile | null;
+}
+
 export interface DirectDownloadRequest {
+  access?: AuthenticatedDownloadAccess;
   downloadId: number;
   fileUrl: string;
   fileName?: string;
@@ -158,13 +165,13 @@ export class DirectDownloadService {
   }
 
   async add(release: DirectDownloadRequest): Promise<{ clientKey: string }> {
-    const url = await ensureSafeUrl(release.fileUrl, { allowPrivate: ALLOW_PRIVATE });
+    const url = await ensureSafeUrl(release.fileUrl, { allowPrivate: release.access?.allowPrivateAddress ?? ALLOW_PRIVATE });
 
     const directory = join(this.root, release.clientKey);
     const target = safeJoin(directory, stagedDirectFileName(release.fileName, release.format));
 
     await mkdir(directory, { recursive: true });
-    this.start(release.downloadId, release.clientKey, url, target, directory, 0, null, null);
+    this.start(release.downloadId, release.clientKey, url, target, directory, 0, null, null, release.access);
 
     return { clientKey: release.clientKey };
   }
@@ -208,6 +215,7 @@ export class DirectDownloadService {
     offset: number,
     validator: string | null,
     expectedBytes: number | null,
+    access?: AuthenticatedDownloadAccess,
   ): void {
     this.progress.set(clientKey, {
       state: 'downloading',
@@ -220,10 +228,14 @@ export class DirectDownloadService {
 
     // Deliberately not awaited: `add` hands the work over the way a torrent client does, and the
     // poll loop is what reports on it from here.
-    const task = this.run(downloadId, clientKey, url, target, controller.signal, offset, validator, expectedBytes)
+    const task = this.run(downloadId, clientKey, url, target, controller.signal, offset, validator, expectedBytes, access)
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        const message = error instanceof Error ? error.message : String(error);
+        const message = access
+          ? 'Could not copy the completed download from Shelfmark. Check its address, API key and file availability.'
+          : error instanceof Error
+            ? error.message
+            : String(error);
         const current = this.progress.get(clientKey);
         this.progress.set(clientKey, {
           state: 'failed',
@@ -349,8 +361,12 @@ export class DirectDownloadService {
     offset: number,
     validator: string | null,
     expectedBytes: number | null,
+    access?: AuthenticatedDownloadAccess,
   ): Promise<void> {
-    const response = await this.open(url, signal, offset > 0 ? { Range: `bytes=${offset}-`, 'If-Range': validator as string } : {});
+    const response = await this.open(url, signal, offset > 0 ? { Range: `bytes=${offset}-`, 'If-Range': validator as string } : {}, access);
+    if (access && /^application\/(?:zip|x-zip-compressed)(?:;|$)/i.test(response.headers.get('content-type') ?? '')) {
+      target = `${target}.zip`;
+    }
     const responseMeta = validateDownloadResponse(response, offset, expectedBytes, validator);
     const totalBytes = responseMeta.totalBytes;
     if (totalBytes !== null && totalBytes > MAX_FILE_BYTES) {
@@ -473,14 +489,16 @@ export class DirectDownloadService {
    * socket open until the agent times it out: five hops through a chain of mirrors would otherwise
    * leave five sockets and five buffers behind per grab.
    */
-  private async open(url: URL, signal: AbortSignal, headers: Record<string, string> = {}): Promise<Response> {
+  private async open(url: URL, signal: AbortSignal, headers: Record<string, string> = {}, access?: AuthenticatedDownloadAccess): Promise<Response> {
     let current = url;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      const response = await this.openHop(current, signal, headers);
+      const response = await this.openHop(current, signal, { ...headers, ...access?.headers }, access);
 
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location');
         await response.body?.cancel().catch(() => {});
+        if (access)
+          throw new BadRequestException('The authenticated download endpoint redirected. Set the direct Shelfmark address in source settings.');
         if (!location) throw new Error(`That URL answered ${response.status} without saying where to go`);
         current = await ensureSafeUrl(new URL(location, current).href, { allowPrivate: ALLOW_PRIVATE });
 
@@ -508,7 +526,7 @@ export class DirectDownloadService {
    *
    * The body is not left unbounded: `run` holds it to an idle timeout and a total ceiling.
    */
-  private async openHop(url: URL, signal: AbortSignal, headers: Record<string, string>): Promise<Response> {
+  private async openHop(url: URL, signal: AbortSignal, headers: Record<string, string>, access?: AuthenticatedDownloadAccess): Promise<Response> {
     const connect = new AbortController();
     const deadline = setTimeout(() => connect.abort(new Error(`That URL did not answer within ${CONNECT_TIMEOUT_MS}ms`)), CONNECT_TIMEOUT_MS);
     try {
@@ -522,7 +540,7 @@ export class DirectDownloadService {
         // Pinned, because the URL came from an indexer or a plugin rather than from an operator:
         // this is exactly the caller the resolve-twice window in `safeFetch` is not acceptable
         // for, so the address that passed policy is the address the socket opens to.
-        { allowPrivate: ALLOW_PRIVATE, profile: null, pinResolvedAddress: true },
+        { allowPrivate: access?.allowPrivateAddress ?? ALLOW_PRIVATE, profile: access?.networkProfile ?? null, pinResolvedAddress: true },
       );
     } finally {
       clearTimeout(deadline);

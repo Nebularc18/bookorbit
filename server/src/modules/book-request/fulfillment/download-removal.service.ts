@@ -1,3 +1,4 @@
+import { ShelfmarkDownloadService } from './shelfmark-download.service';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { IN_FLIGHT_BOOK_REQUEST_DOWNLOAD_STATUSES } from '@bookorbit/types';
 
@@ -29,6 +30,7 @@ export class DownloadRemovalService {
     private readonly clients: DownloadClientConfigService,
     private readonly registry: DownloadClientRegistry,
     private readonly direct: DirectDownloadService,
+    private readonly shelfmark: ShelfmarkDownloadService,
   ) {}
 
   /**
@@ -38,7 +40,7 @@ export class DownloadRemovalService {
   async removeAttempt(requestId: number, downloadId: number, deleteFiles: boolean, actor: string): Promise<boolean> {
     const download = await this.downloads.findById(downloadId);
     if (!download || download.requestId !== requestId) throw new NotFoundException('That download attempt does not belong to this request');
-    if (download.source !== 'direct_url' && download.downloadClientId === null) {
+    if (!['direct_url', 'shelfmark'].includes(download.source) && download.downloadClientId === null) {
       throw new BadRequestException('That attempt is no longer attached to a download client');
     }
 
@@ -54,7 +56,8 @@ export class DownloadRemovalService {
   async removeLatestForRequest(requestId: number, deleteFiles: boolean, actor: string): Promise<DownloadRemovalOutcome> {
     const latest = (await this.downloads.findLatestForRequests([requestId])).get(requestId);
     const download = latest?.download;
-    if (!download || (download.source !== 'direct_url' && download.downloadClientId === null)) return { removed: false, error: null };
+    if (!download || (!['direct_url', 'shelfmark'].includes(download.source) && download.downloadClientId === null))
+      return { removed: false, error: null };
 
     let error: string | null = null;
     try {
@@ -100,10 +103,11 @@ export class DownloadRemovalService {
 
   /** A direct file has no seed to preserve once its Book Dock copy exists. Cleanup is best-effort. */
   async cleanupStagedDirectDownload(download: BookRequestDownloadRow): Promise<void> {
-    if (download.source !== 'direct_url') return;
+    if (!['direct_url', 'shelfmark'].includes(download.source)) return;
 
     try {
-      await this.detach(download, true);
+      if (download.source === 'shelfmark' && download.clientKey) await this.direct.remove(download.clientKey, { deleteFiles: true });
+      else await this.detach(download, true);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
@@ -121,7 +125,9 @@ export class DownloadRemovalService {
     // There is no swarm to preserve on a staged file, so its bytes always go with the attempt.
     const shouldDeleteFiles = isDirect || deleteFiles;
 
-    if (isDirect) {
+    if (download.source === 'shelfmark') {
+      await this.shelfmark.remove(download);
+    } else if (isDirect) {
       await this.direct.remove(download.clientKey, { deleteFiles: shouldDeleteFiles });
     } else {
       const config = await this.clients.resolveConfig(download.downloadClientId as number);

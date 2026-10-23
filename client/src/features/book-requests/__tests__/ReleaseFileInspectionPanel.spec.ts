@@ -175,6 +175,14 @@ describe('ReleaseFileInspectionPanel', () => {
     expect(mountPanel().text()).not.toContain('E-book')
   })
 
+  it('explains that Shelfmark files are inspected after download', () => {
+    const wrapper = mountPanel({
+      inspection: inspection({ source: 'shelfmark', status: 'metadata_unavailable', files: [], totalFiles: null, primaryFileCount: null }),
+    })
+    expect(wrapper.get('[role="status"]').text()).toContain('Shelfmark manages this download')
+    expect(wrapper.text()).not.toContain('swarm')
+  })
+
   it('explains why magnets have no file list yet', () => {
     const wrapper = mountPanel({
       inspection: inspection({
