@@ -63,7 +63,7 @@ function makeService(
 
   // The real removal service, not a double: these tests are about what reaches the download
   // client, and a stubbed remover would assert only that the seed service called a mock.
-  const removal = new DownloadRemovalService(downloads as never, clients as never, registry as never);
+  const removal = new DownloadRemovalService(downloads as never, clients as never, registry as never, {} as never, {} as never);
 
   const service = new RequestSeedService(
     downloads as never,

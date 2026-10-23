@@ -112,7 +112,7 @@ Android audio source uses revision conflicts plus captured-time comparison. Read
 
 ## Later integration and remaining work
 
-Shelfmark should remain an explicit user action. A concrete first integration is a manual download destination into the prototype's existing Book Dock staging directory, followed by user-reviewed finalization into the selected library. Preserve download provenance and chosen edition language/narrator. Never point a download client at organized library paths or automatically merge its output into a work. The existing Book Dock upload/finalize service is the API boundary for a future adapter. [Shelfmark's own scope](https://github.com/calibrain/shelfmark/blob/main/readme.md) is manual search/download, not automatic library monitoring. No adapter or acquisition was implemented.
+The initial prototype did not implement acquisition. Book Requests now provides a [Shelfmark API integration](SHELFMARK_REQUESTS.md). It transfers completed files into BookOrbit's staging directory and uses the existing verification, review and finalization workflow. Download clients never write directly into organized library paths, and downloaded editions are not automatically merged into a work.
 
 Practical planning ranges for one developer already comfortable with this stack, stated as engineering effort rather than delivery promises:
 
@@ -122,7 +122,6 @@ Practical planning ranges for one developer already comfortable with this stack,
 - Fix ebook offline revisions/idempotency and choose explicit conflict UX across clients: 1 to 3 person-weeks, plus coordination with closed clients.
 - iOS compatibility validation on physical hardware: 3 to 5 engineering days once the devices/builds are available. A grouped native UI cannot be estimated responsibly without source access; a new iOS client is a separate multi-month project.
 - Scheduled encrypted backups, retention/alerts, path/secret recovery and guided restore with recurring restore drills: 1 to 2 person-weeks.
-- Manual Shelfmark handoff with provenance and reviewed imports: 3 to 7 engineering days.
 - Validate metadata/renaming, series reliability and household permissions at realistic library scale: 1 to 2 person-weeks.
 
 These areas overlap and are not an additive fixed-price estimate. No full-library performance benchmark, metadata-provider runtime pass, production migration, mobile rewrite, or production backup deployment is claimed.

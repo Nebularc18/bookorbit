@@ -548,6 +548,12 @@ function seedsBack(release: ReleaseCandidateItem): boolean {
   return swarmByIndexer.value.get(release.indexerId) ?? release.seeders !== null
 }
 
+function grabLabel(release: ReleaseCandidateItem, index: number): string {
+  if (isInspecting(release)) return t('bookRequests.releases.inspectingShort')
+  if (release.gateway === 'shelfmark') return t('bookRequests.releases.downloadWithShelfmark')
+  return t(isBest(index) ? 'bookRequests.releases.grab' : 'bookRequests.releases.send')
+}
+
 function deliveryFor(release: ReleaseCandidateItem): DownloadDelivery {
   return deliveryByIndexer.value.get(release.indexerId) ?? (seedsBack(release) ? 'torrent' : 'file')
 }
@@ -1512,13 +1518,7 @@ function showEverySource(): void {
                     >
                       <Loader2 v-if="isInspecting(release)" class="size-3.5 animate-spin" aria-hidden="true" />
                       <Download v-else-if="isBest(index)" :size="14" aria-hidden="true" />
-                      {{
-                        isInspecting(release)
-                          ? t('bookRequests.releases.inspectingShort')
-                          : isBest(index)
-                            ? t('bookRequests.releases.grab')
-                            : t('bookRequests.releases.send')
-                      }}
+                      {{ grabLabel(release, index) }}
                     </Button>
                   </div>
                 </div>

@@ -1,3 +1,5 @@
+import { ShelfmarkAdapter } from './indexers/adapters/shelfmark.adapter';
+import { ShelfmarkDownloadService } from './fulfillment/shelfmark-download.service';
 import { Module, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
@@ -145,11 +147,13 @@ import { RequestWatchdogService } from './fulfillment/request-watchdog.service';
     IndexerKeepaliveService,
     IndexerOperationLock,
     TorznabAdapter,
+    ShelfmarkAdapter,
+    ShelfmarkDownloadService,
     NewznabAdapter,
     {
       provide: INDEXER_ADAPTERS,
-      useFactory: (torznab: TorznabAdapter, newznab: NewznabAdapter) => [torznab, newznab],
-      inject: [TorznabAdapter, NewznabAdapter],
+      useFactory: (torznab: TorznabAdapter, newznab: NewznabAdapter, shelfmark: ShelfmarkAdapter) => [torznab, newznab, shelfmark],
+      inject: [TorznabAdapter, NewznabAdapter, ShelfmarkAdapter],
     },
 
     BookRequestDownloadRepository,

@@ -223,7 +223,7 @@ export const UNSETTLED_BOOK_REQUEST_DOWNLOAD_STATUSES: readonly BookRequestDownl
   "needs_review",
 ];
 
-export const BOOK_REQUEST_DOWNLOAD_SOURCES = ["magnet", "torrent_file", "direct_url", "nzb_file"] as const;
+export const BOOK_REQUEST_DOWNLOAD_SOURCES = ["magnet", "torrent_file", "direct_url", "nzb_file", "shelfmark"] as const;
 export type BookRequestDownloadSource = (typeof BOOK_REQUEST_DOWNLOAD_SOURCES)[number];
 
 /** Which kind of client can carry out a grab of each source. */
@@ -231,6 +231,7 @@ export const DELIVERY_BY_DOWNLOAD_SOURCE: Record<BookRequestDownloadSource, Down
   magnet: "torrent",
   torrent_file: "torrent",
   direct_url: "file",
+  shelfmark: "file",
   nzb_file: "usenet",
 };
 

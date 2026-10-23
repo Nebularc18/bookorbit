@@ -20,6 +20,8 @@ describe('WorkService repository boundary', () => {
     createAndAssign: vi.fn<WorkRepository['createAndAssign']>(),
     detachEdition: vi.fn<WorkRepository['detachEdition']>(),
     catalog: vi.fn<WorkRepository['catalog']>(),
+    findEditionWork: vi.fn<WorkRepository['findEditionWork']>(),
+    findUnreadEditions: vi.fn<WorkRepository['findUnreadEditions']>(),
   };
   const library = { verifyUserAccess: vi.fn(), verifyUserAccessLevel: vi.fn() };
   const book = { verifyBookAccess: vi.fn() };
@@ -46,6 +48,23 @@ describe('WorkService repository boundary', () => {
     service = module.get(WorkService);
   });
 
+  it('checks source access before looking up linked editions', async () => {
+    book.verifyBookAccess.mockRejectedValue(new ForbiddenException());
+    await expect(service.linkedUnreadEditions(1, user)).rejects.toThrow(ForbiddenException);
+    expect(repository.findEditionWork).not.toHaveBeenCalled();
+  });
+  it('returns only visible unread editions scoped to the current reader and library', async () => {
+    repository.findEditionWork.mockResolvedValue({ workId: 9, libraryId: 3 });
+    repository.findUnreadEditions.mockResolvedValue([{ bookId: 2 }]);
+    await expect(service.linkedUnreadEditions(1, user)).resolves.toEqual({ bookIds: [2] });
+    expect(query.buildWhere).toHaveBeenCalledWith(null, { accessibleLibraryIds: [3], userId: 7, contentFilters: user.contentFilters });
+    expect(repository.findUnreadEditions).toHaveBeenCalledWith(9, 1, 7, undefined);
+  });
+  it('does not infer links for editions without a saved group', async () => {
+    repository.findEditionWork.mockResolvedValue({ workId: null, libraryId: 3 });
+    await expect(service.linkedUnreadEditions(1, user)).resolves.toEqual({ bookIds: [] });
+    expect(repository.findUnreadEditions).not.toHaveBeenCalled();
+  });
   it('requires editor access before creating or assigning a work', async () => {
     library.verifyUserAccessLevel.mockRejectedValue(new ForbiddenException());
     await expect(service.group(dto, user)).rejects.toThrow(ForbiddenException);

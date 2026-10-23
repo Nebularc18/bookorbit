@@ -219,6 +219,11 @@ beforeEach(() => {
 })
 
 describe('ReleasePickerPanel', () => {
+  it('offers Shelfmark downloads directly from the request release list', async () => {
+    const wrapper = await render({ ...MIXED, releases: [{ ...MIXED.releases[0], gateway: 'shelfmark' }] })
+    expect(wrapper.findAll('button').some((button) => button.text() === 'Download with Shelfmark')).toBe(true)
+  })
+
   it('states the searched key once, and what every source did with it', async () => {
     const wrapper = await render()
     const panel = wrapper.get('section[aria-label="Active search"]')

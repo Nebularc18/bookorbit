@@ -1,4 +1,5 @@
 import { api } from '@/lib/api'
+import { offerLinkedEditionsRead } from './offerLinkedEditionsRead'
 import { Book, BookCheck, BookMarked, BookOpen, BookX, Pause, RotateCcw, ScanLine } from '@lucide/vue'
 import type { ReadStatus, UserBookStatus } from '@bookorbit/types'
 
@@ -73,7 +74,9 @@ export function useBookStatus() {
       }
       throw new ReadStatusUpdateError(`HTTP ${res.status}`, errorCode)
     }
-    return (await res.json()) as UserBookStatus
+    const state = (await res.json()) as UserBookStatus
+    if (patch.status === 'read' && state.status === 'read') void offerLinkedEditionsRead(bookId)
+    return state
   }
 
   async function setStatus(bookId: number, status: ReadStatus): Promise<UserBookStatus> {

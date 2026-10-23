@@ -1,7 +1,8 @@
 import { computed, ref, watch } from 'vue'
-import { Permission, type WorkCatalogPage, type WorkEdition } from '@bookorbit/types'
+import { Permission, type WorkCatalogItem, type WorkCatalogPage, type WorkEdition } from '@bookorbit/types'
 import { useRoute } from 'vue-router'
-import { apiJson, jsonBody } from '@/lib/api-json'
+import { apiJson, apiSend, jsonBody } from '@/lib/api-json'
+import { usePermissions } from '@/features/auth/composables/usePermissions'
 import { useLibraryPermissions } from '@/features/library/composables/useLibraryPermissions'
 
 export function useWorkCatalog() {
@@ -20,6 +21,9 @@ export function useWorkCatalog() {
   const selectedBookIds = ref<number[]>([])
   const error = ref('')
   const busy = ref(false)
+  const markedReadBookIds = ref<number[]>([])
+  const { isDemoRestrictedAccount } = usePermissions()
+  const canMarkRead = computed(() => !isDemoRestrictedAccount.value)
   const { hasLibraryPermission } = useLibraryPermissions()
   const canGroup = computed(() => hasLibraryPermission(Permission.LibraryEditMetadata, libraryId.value, 'editor'))
   const groupBookIds = computed(() => bookIds.value.split(',').map((value) => Number(value.trim())))
@@ -45,7 +49,10 @@ export function useWorkCatalog() {
       if (format.value) query.set('format', format.value)
       if (search.value.trim()) query.set('search', search.value.trim())
       const result = await apiJson<WorkCatalogPage>(`/api/v1/works?${query}`, undefined, 'common.error')
-      if (currentRequest === requestId) page.value = result
+      if (currentRequest === requestId) {
+        page.value = result
+        markedReadBookIds.value = []
+      }
     } catch (cause) {
       if (currentRequest === requestId) error.value = cause instanceof Error ? cause.message : String(cause)
     } finally {
@@ -106,6 +113,24 @@ export function useWorkCatalog() {
   async function ungroup(workId: number, bookId: number) {
     await mutate(() => apiJson(`/api/v1/works/${workId}/editions/${bookId}`, { method: 'DELETE' }, 'common.error'))
   }
+  async function markEditionsRead(work: WorkCatalogItem) {
+    if (busy.value || !canMarkRead.value || !work.editions.length) return
+    const ids = [...new Set(work.editions.map((edition) => edition.bookId))]
+    if (ids.length > 100) return
+    busy.value = true
+    error.value = ''
+    try {
+      await apiSend('/api/v1/books/bulk-set-status', jsonBody('POST', { bookIds: ids, status: 'read' }), 'common.error')
+      markedReadBookIds.value = [...new Set([...markedReadBookIds.value, ...ids])]
+    } catch (cause) {
+      error.value = cause instanceof Error ? cause.message : String(cause)
+    } finally {
+      busy.value = false
+    }
+  }
+  function editionsMarkedRead(work: WorkCatalogItem) {
+    return work.editions.length > 0 && work.editions.every((edition) => markedReadBookIds.value.includes(edition.bookId))
+  }
   function readerLink(edition: WorkEdition, file: WorkEdition['files'][number]) {
     return { name: 'reader', params: { bookId: edition.bookId, fileId: file.id }, query: { format: file.format } }
   }
@@ -114,6 +139,7 @@ export function useWorkCatalog() {
     bookIds.value = ''
     selectedBookIds.value = []
     page.value = { items: [], hasMore: false }
+    markedReadBookIds.value = []
     void filter()
   })
   return {
@@ -130,6 +156,9 @@ export function useWorkCatalog() {
     error,
     busy,
     canGroup,
+    canMarkRead,
+    markEditionsRead,
+    editionsMarkedRead,
     canSubmitGroup,
     load,
     filter,

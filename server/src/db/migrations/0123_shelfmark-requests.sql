@@ -1,0 +1,3 @@
+ALTER TABLE "book_request_downloads" DROP CONSTRAINT "book_request_downloads_source_chk";--> statement-breakpoint
+ALTER TABLE "book_request_downloads" ADD COLUMN "remote_download" jsonb;--> statement-breakpoint
+ALTER TABLE "book_request_downloads" ADD CONSTRAINT "book_request_downloads_source_chk" CHECK ("book_request_downloads"."source" in ('magnet', 'torrent_file', 'direct_url', 'nzb_file', 'shelfmark'));

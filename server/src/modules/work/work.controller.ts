@@ -13,6 +13,10 @@ export class WorkController {
   catalog(@Query() query: WorkCatalogQueryDto, @CurrentUser() user: RequestUser) {
     return this.service.catalog(query, user);
   }
+  @Get('editions/:bookId/linked-unread')
+  linkedUnreadEditions(@Param('bookId', ParseIntPipe) bookId: number, @CurrentUser() user: RequestUser) {
+    return this.service.linkedUnreadEditions(bookId, user);
+  }
   @Post()
   @RequirePermission(Permission.LibraryEditMetadata)
   group(@Body() dto: GroupWorkDto, @CurrentUser() user: RequestUser) {

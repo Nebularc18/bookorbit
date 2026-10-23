@@ -69,3 +69,18 @@ describe('WorkRepository catalog', () => {
     expect(query).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('WorkRepository unread linked editions', () => {
+  it('bounds results and filters by work, reader status, library visibility and source exclusion', async () => {
+    const { repository, query } = fixture([[[2]]]);
+    await expect(repository.findUnreadEditions(9, 1, 7, eq(schema.books.libraryId, 3))).resolves.toEqual([{ bookId: 2 }]);
+    const [config, params] = query.mock.calls[0]!;
+    expect(config.text).toContain('"user_book_status"."user_id" =');
+    expect(config.text).toContain('"books"."work_id" =');
+    expect(config.text).toContain('"books"."library_id" =');
+    expect(config.text).toContain('"books"."id" <>');
+    expect(config.text).toContain("<> 'read'");
+    expect(config.text).toContain('limit');
+    expect(params).toEqual(expect.arrayContaining([9, 1, 7, 3, 100, 'processing']));
+  });
+});

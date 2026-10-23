@@ -1,3 +1,6 @@
+import { ShelfmarkDownloadService } from './shelfmark-download.service';
+import type { ShelfmarkRelease } from '../indexers/adapters/shelfmark.types';
+import { shelfmarkKey } from '../indexers/adapters/shelfmark.adapter';
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
 import {
@@ -149,6 +152,7 @@ export class RequestFulfillmentService {
     private readonly notifier: BookRequestNotifier,
     private readonly gateway: BookRequestGateway,
     private readonly events: BookRequestEventsService,
+    private readonly shelfmark: ShelfmarkDownloadService,
   ) {}
 
   /**
@@ -252,8 +256,8 @@ export class RequestFulfillmentService {
     // Deliberately outside it: this refuses on the routing alone, before anything is asked of a
     // client, and an attempt nothing was ever asked to take is not an attempt.
     const client = await this.resolveClient(dto.downloadClientId ?? null, grab.source);
-    const directUrl = client === null ? requireFileUrl(grab) : null;
-    const directFileName = client === null ? stagedDirectFileName(grab.fileName, grab.releaseFormat) : null;
+    const directUrl = grab.source === 'direct_url' ? requireFileUrl(grab) : null;
+    const directFileName = grab.source === 'direct_url' ? stagedDirectFileName(grab.fileName, grab.releaseFormat) : null;
 
     let download: BookRequestDownloadRow;
     try {
@@ -262,6 +266,7 @@ export class RequestFulfillmentService {
         downloadClientId: client?.id ?? null,
         indexerId: grab.indexerId ?? null,
         source: grab.source,
+        ...(grab.shelfmarkRelease ? { remoteDownload: { source: grab.shelfmarkRelease.source, sourceId: grab.shelfmarkRelease.source_id } } : {}),
         automated: user === null,
         releaseTitle: grab.releaseTitle,
         releaseGuid: grab.releaseGuid ?? null,
@@ -285,7 +290,9 @@ export class RequestFulfillmentService {
     }
 
     try {
-      if (client === null) {
+      if (grab.source === 'shelfmark') {
+        await this.shelfmark.add(grab.indexerId!, grab.shelfmarkRelease!);
+      } else if (client === null) {
         await this.direct.add({
           downloadId: download.id,
           fileUrl: directUrl as string,
@@ -312,7 +319,8 @@ export class RequestFulfillmentService {
           ),
         );
       }
-    } catch (error) {
+    } catch (caught) {
+      const error = caught instanceof IndexerSearchException ? indexerRefusal(caught, {}) : caught;
       const message = error instanceof Error ? error.message : String(error);
       await this.downloads.update(download.id, {
         status: 'failed',
@@ -415,6 +423,7 @@ export class RequestFulfillmentService {
     try {
       const indexer = await this.indexers.resolveConfig(release.indexerId);
       const adapter = this.indexerRegistry.require(indexer.adapterType);
+      if (indexer.adapterType === 'shelfmark') return 'shelfmark';
       if (adapter.resolveFile) return 'direct_url';
       if (adapter.fetchNzbFile) return 'nzb_file';
       return 'torrent_file';
@@ -670,6 +679,18 @@ export class RequestFulfillmentService {
     }
 
     const adapter = this.indexerRegistry.require(indexer.adapterType);
+    if (indexer.adapterType === 'shelfmark') {
+      if (!release.shelfmark) throw grabError('GRAB_SOURCE_REFUSED', 'Shelfmark release details expired. Refresh the release list.');
+      return {
+        ...snapshot,
+        source: 'shelfmark',
+        shelfmarkRelease: release.shelfmark,
+        clientKey: shelfmarkKey(indexer.id, release.shelfmark.source, release.shelfmark.source_id),
+        inspection: metadataUnavailableInspection('shelfmark'),
+        seedRatioGoal: null,
+        seedTimeMinutes: null,
+      };
+    }
 
     // A source that serves the file itself. Resolved here rather than at search time because it
     // costs a request per release, and only the one the approver picked is worth spending on.
@@ -769,6 +790,11 @@ export class RequestFulfillmentService {
    * has to reject it.
    */
   private async resolveClient(requestedId: number | null, source: BookRequestDownloadSource) {
+    if (source === 'shelfmark') {
+      if (requestedId !== null)
+        throw grabError('GRAB_CLIENT_REFUSED', 'Shelfmark manages its own download clients. Leave the client selection empty.');
+      return null;
+    }
     if (requestedId === null) {
       if (DELIVERY_BY_DOWNLOAD_SOURCE[source] === 'file') return null;
 
@@ -862,7 +888,7 @@ async function resolveReleaseFile(adapter: IndexerAdapter, release: ReleaseCandi
  * VIP releases rather than about the tracker: skipping the whole source would throw away every
  * release it holds over a restriction that applies to a handful of them.
  */
-function indexerRefusal(error: IndexerSearchException, release: ReleaseCandidate): HttpException {
+function indexerRefusal(error: IndexerSearchException, release: Pick<ReleaseCandidate, 'vipOnly'>): HttpException {
   if (RETRYABLE_INDEXER_FAILURES.includes(error.failure)) {
     return new ServiceUnavailableException(
       { message: error.message, errorCode: 'GRAB_SOURCE_UNAVAILABLE' satisfies GrabFailureCode, statusCode: HttpStatus.SERVICE_UNAVAILABLE },
@@ -959,6 +985,7 @@ interface ParsedGrab {
 
 /** A parsed grab plus what an indexer knows about it, which a hand-pasted link cannot supply. */
 interface ResolvedGrab extends ParsedGrab {
+  shelfmarkRelease?: ShelfmarkRelease;
   indexerId?: number;
   indexerName?: string;
   indexerAdapterType?: string;
@@ -1091,7 +1118,7 @@ function directFileInspection(fileName: string, sizeBytes: number | null | undef
   };
 }
 
-function metadataUnavailableInspection(source: 'magnet' | 'nzb_file'): ReleaseFileInspection {
+function metadataUnavailableInspection(source: 'magnet' | 'nzb_file' | 'shelfmark'): ReleaseFileInspection {
   return {
     source,
     status: 'metadata_unavailable',

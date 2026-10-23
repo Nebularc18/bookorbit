@@ -4,7 +4,7 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { AUDIO_FORMAT_LIST, type WorkCatalogPage, type WorkEdition } from '@bookorbit/types';
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
-import { books, bookMetadata, works } from '../../db/schema';
+import { books, bookMetadata, works, userBookStatus } from '../../db/schema';
 import { WorkCatalogQueryDto } from './dto/work.dto';
 import { workCatalogKey } from './work-catalog-key';
 import { escapeLikePattern } from '../../common/utils/accent-insensitive-search.utils';
@@ -149,6 +149,29 @@ export class WorkRepository {
       })),
       hasMore: page.length > query.limit,
     };
+  }
+
+  async findEditionWork(bookId: number) {
+    const [edition] = await this.db.select({ workId: books.workId, libraryId: books.libraryId }).from(books).where(eq(books.id, bookId)).limit(1);
+    return edition;
+  }
+
+  async findUnreadEditions(workId: number, bookId: number, userId: number, visible: SQL | undefined) {
+    return this.db
+      .select({ bookId: books.id })
+      .from(books)
+      .leftJoin(userBookStatus, and(eq(userBookStatus.bookId, books.id), eq(userBookStatus.userId, userId)))
+      .where(
+        and(
+          visible,
+          eq(books.workId, workId),
+          ne(books.id, bookId),
+          ne(books.status, 'processing'),
+          sql`coalesce(${userBookStatus.status}, 'unread') <> 'read'`,
+        ),
+      )
+      .orderBy(books.id)
+      .limit(100);
   }
 
   lockEditions(bookIds: number[], tx: DbExecutor) {

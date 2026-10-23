@@ -179,7 +179,7 @@ export class RequestImportService implements OnApplicationBootstrap {
    * configured for it, which is also what declares the directory the import may read out of.
    */
   private async resolveLocalPath(download: BookRequestDownloadRow, contentPath: string): Promise<ResolvedDownloadPath> {
-    if (download.source === 'direct_url') {
+    if (['direct_url', 'shelfmark'].includes(download.source)) {
       const containmentRoot = directDownloadRoot(this.config.getOrThrow<string>('storage.appDataPath'));
       await this.pathMappings.assertWithinRoot(containmentRoot, contentPath);
       return { localPath: contentPath, containmentRoot };
@@ -644,7 +644,8 @@ export class RequestImportService implements OnApplicationBootstrap {
    */
   private async placeFile(sourceFile: string, destPath: string, download: BookRequestDownloadRow): Promise<void> {
     const wantsHardlink =
-      download.source === 'direct_url' || (download.downloadClientId !== null && (await this.clients.useHardlinks(download.downloadClientId)));
+      ['direct_url', 'shelfmark'].includes(download.source) ||
+      (download.downloadClientId !== null && (await this.clients.useHardlinks(download.downloadClientId)));
 
     if (wantsHardlink) {
       try {

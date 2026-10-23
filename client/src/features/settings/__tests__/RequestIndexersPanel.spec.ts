@@ -897,6 +897,28 @@ describe('RequestIndexersPanel', () => {
     expect(torznab.findAll('button').filter((button) => button.text().includes('Add indexer'))).toHaveLength(1)
   })
 
+  it('configures Shelfmark with an API key and no client or category settings', async () => {
+    const shelfmark = descriptor({
+      type: 'shelfmark',
+      label: 'Shelfmark',
+      requiresCredential: true,
+      usesCategories: false,
+      seedsBack: false,
+      delivery: 'file',
+      defaultCategories: { ebook: [], audiobook: [] },
+    })
+    const wrapper = await mountPanel({ adapters: [descriptor(), shelfmark] })
+    await clickInPanel(wrapper, 'Add indexer')
+    const type = sheet().querySelector<HTMLSelectElement>('#indexer-type')!
+    type.value = 'shelfmark'
+    type.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushPromises()
+    expect(sheet().textContent).toContain('SHELFMARK_API_KEY')
+    expect(sheet().textContent).toContain('Finished files are copied into BookOrbit automatically')
+    expect(sheet().textContent).toContain('API key')
+    expect(sheet().textContent).not.toContain('Seed ratio')
+  })
+
   it('offers every built-in indexer type for a new source', async () => {
     const newznab = descriptor({
       type: 'newznab',
@@ -910,7 +932,11 @@ describe('RequestIndexersPanel', () => {
 
     await clickInPanel(wrapper, 'Add indexer')
 
-    expect([...sheet().querySelectorAll<HTMLOptionElement>('#indexer-type option')].map((option) => option.value)).toEqual(['torznab', 'newznab'])
+    expect([...sheet().querySelectorAll<HTMLOptionElement>('#indexer-type option')].map((option) => option.value)).toEqual([
+      'torznab',
+      'newznab',
+      'shelfmark',
+    ])
     expect(sheet().querySelector('#indexer-name')).not.toBeNull()
     expect(sheet().textContent).toContain('torznab')
 

@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => ({ api: mocks.api }))
 
+vi.mock('../offerLinkedEditionsRead', () => ({ offerLinkedEditionsRead: vi.fn<typeof offerLinkedEditionsRead>() }))
+import { offerLinkedEditionsRead } from '../offerLinkedEditionsRead'
+
 import { ReadStatusUpdateError, useBookStatus } from '../useBookStatus'
 
 describe('useBookStatus', () => {
@@ -68,6 +71,15 @@ describe('useBookStatus', () => {
     )
   })
 
+  it('offers linked editions only after a successful explicit read update', async () => {
+    mocks.api.mockResolvedValue({ ok: true, json: async () => ({ status: 'read' }) } as Response)
+    const { setStatus, updateStatus } = useBookStatus()
+    await setStatus(5, 'read')
+    expect(offerLinkedEditionsRead).toHaveBeenCalledWith(5)
+    vi.mocked(offerLinkedEditionsRead).mockClear()
+    await updateStatus(5, { finishedAt: '2026-04-04' })
+    expect(offerLinkedEditionsRead).not.toHaveBeenCalled()
+  })
   it('throws on non-ok responses', async () => {
     ;(mocks.api as Mock).mockResolvedValue({ ok: false, status: 400 } as Response)
     const { setStatus } = useBookStatus()

@@ -85,9 +85,9 @@ export const bookRequestDownloads = pgTable(
       .notNull()
       .references(() => bookRequests.id, { onDelete: 'cascade' }),
     /**
-     * Null for a direct file, which BookOrbit fetches itself rather than handing to a client, and
-     * null again once a client a torrent was handed to is deleted. `source` is what tells those
-     * two apart: `direct_url` is ours to poll and clean up, anything else is an orphaned attempt.
+     * Null for direct and Shelfmark files, which BookOrbit stages itself, and null again once an
+     * external download client is deleted. `source` distinguishes integrated transfers from
+     * orphaned attempts whose client no longer exists.
      */
     downloadClientId: integer('download_client_id').references(() => downloadClients.id, { onDelete: 'set null' }),
 
@@ -95,6 +95,8 @@ export const bookRequestDownloads = pgTable(
     indexerId: integer('indexer_id').references(() => requestIndexers.id, { onDelete: 'set null' }),
 
     source: varchar('source', { length: 20 }).notNull(),
+    // The public client key is a digest; polling still needs Shelfmark's source-specific job identity.
+    remoteDownload: jsonb('remote_download').$type<{ source: string; sourceId: string }>(),
     /** Grabbed by the automation rather than by a person, which is what makes it retryable. */
     automated: boolean('automated').notNull().default(false),
     releaseTitle: varchar('release_title', { length: 500 }).notNull(),
@@ -176,7 +178,7 @@ export const bookRequestDownloads = pgTable(
       .on(sql`coalesce(${t.downloadClientId}, 0)`, t.clientKey)
 
       .where(sql`${t.status} in ('queued', 'downloading', 'completed', 'importing', 'needs_review')`),
-    check('book_request_downloads_source_chk', sql`${t.source} in ('magnet', 'torrent_file', 'direct_url', 'nzb_file')`),
+    check('book_request_downloads_source_chk', sql`${t.source} in ('magnet', 'torrent_file', 'direct_url', 'nzb_file', 'shelfmark')`),
     check(
       'book_request_downloads_status_chk',
       sql`${t.status} in ('queued', 'downloading', 'completed', 'importing', 'needs_review', 'imported', 'failed')`,

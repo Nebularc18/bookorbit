@@ -190,6 +190,7 @@ export function toReleaseItem(scored: ScoredRelease, indexerName: string, reques
   const formats = orderByPreference(resolveFormats(candidate), request.preferredFormats);
   const fileCount = candidate.primaryFileCount ?? candidate.fileCount ?? null;
   const base = {
+    ...(candidate.shelfmark ? { gateway: 'shelfmark' as const } : {}),
     indexerId: candidate.indexerId,
     indexerName,
     guid: candidate.guid,

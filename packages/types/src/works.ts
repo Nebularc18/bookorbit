@@ -18,3 +18,7 @@ export interface WorkCatalogPage {
   items: WorkCatalogItem[];
   hasMore: boolean;
 }
+
+export interface LinkedUnreadEditions {
+  bookIds: number[];
+}
