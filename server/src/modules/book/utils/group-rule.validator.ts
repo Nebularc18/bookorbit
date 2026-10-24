@@ -129,11 +129,16 @@ const ruleSchema: z.ZodType<Rule> = z
     }
   }) as z.ZodType<Rule>;
 
+const MAX_RULES_PER_GROUP = 100;
+
 const groupRuleSchema = (maxDepth: number): z.ZodType<GroupRule> =>
   z.object({
     type: z.literal('group'),
     join: z.enum(['AND', 'OR']),
-    rules: z.array(maxDepth <= 1 ? ruleSchema : z.union([ruleSchema, z.lazy(() => groupRuleSchema(maxDepth - 1))])).min(1),
+    rules: z
+      .array(maxDepth <= 1 ? ruleSchema : z.union([ruleSchema, z.lazy(() => groupRuleSchema(maxDepth - 1))]))
+      .min(1)
+      .max(MAX_RULES_PER_GROUP),
   }) as z.ZodType<GroupRule>;
 
 export { groupRuleSchema };

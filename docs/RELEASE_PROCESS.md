@@ -8,9 +8,11 @@ This document covers how releases are created, what triggers Docker image publis
 
 BookOrbit uses [semantic-release](https://github.com/semantic-release/semantic-release) for automated versioning and GitHub Release creation. Releases are triggered manually via `workflow_dispatch` and produce:
 
-- A Git tag (`vX.Y.Z`)
+- A Git tag (`nebularc-vX.Y.Z`)
 - A GitHub Release with auto-generated release notes
-- A Docker image pushed to GHCR (`X.Y.Z` + `latest`)
+
+Publishing the draft release then builds and scans the Docker image before publishing
+it to GHCR as `X.Y.Z` and, for GitHub's latest release, `latest`.
 
 ---
 
@@ -108,15 +110,15 @@ The workflow will:
 2. Verify CI has passed for the current commit.
 3. Run semantic-release to determine the next version.
 4. Create a Git tag and GitHub Release with release notes.
-5. Build, scan, and push the Docker image (if a new version was published).
+5. Leave the release as a draft for review. Publishing it starts the image workflow.
 
 ### No release produced
 
-If all commits since the last release are non-releasable types (`chore`, `docs`, `test`, `build`, `ci`, `refactor`), semantic-release will skip the release. The Docker publish job will also be skipped.
+If all commits since the last release are non-releasable types (`chore`, `docs`, `test`, `build`, `ci`, `refactor`), semantic-release will skip the release. No container build runs.
 
 ### Authoring the "What's New" highlights
 
-semantic-release creates the GitHub release as a **draft** with a `## Highlights` scaffold (added by `release.config.js`) that lists this release's `feat` commits as candidate highlights. Open the draft, curate those candidates into user-facing highlight bullets (with optional icons and dragged-in media), validate with `cd server && pnpm whats-new:check <tag>`, then click **Publish release**. The highlights power the in-app "What's New" popup and the `/whats-new` archive; the draft stays hidden in the app until you publish (even though the `:latest` Docker image is pushed beforehand).
+semantic-release creates the GitHub release as a **draft** with a `## Highlights` scaffold (added by `release.config.js`) that lists this release's `feat` commits as candidate highlights. Open the draft, curate those candidates into user-facing highlight bullets (with optional icons and dragged-in media), validate with `cd server && pnpm whats-new:check <tag>`, then click **Publish release**. The highlights power the in-app "What's New" popup and the `/whats-new` archive; the draft stays hidden in the app until you publish and publishing starts the container build.
 
 Full step-by-step walkthrough, format reference, and pre-publish checklist: [docs/whats-new-authoring-guide.md](whats-new-authoring-guide.md).
 
@@ -126,28 +128,18 @@ Full step-by-step walkthrough, format reference, and pre-publish checklist: [doc
 
 ### Release images
 
-The `release.yml` workflow publishes Docker images after a successful release:
+The `container-image.yml` workflow runs when a stable `nebularc-vX.Y.Z` release is
+published. It verifies that the tagged commit is on `main` and has successful CI,
+then builds native amd64 and arm64 images. Each image must pass Trivy before the
+versioned multi-architecture manifest is published.
 
-- `ghcr.io/bookorbit/bookorbit:<X.Y.Z>` - version-specific tag
-- `ghcr.io/bookorbit/bookorbit:latest` - latest stable release
+- `ghcr.io/nebularc18/bookorbit:<X.Y.Z>` is the version-specific tag.
+- `ghcr.io/nebularc18/bookorbit:latest` follows GitHub's latest stable release.
 
-Images are scanned with Trivy before push. If critical or high vulnerabilities are found, the push is blocked.
-
-### Continuous validation images
-
-The `container-image.yml` workflow still runs on CI success (push to `main`) and publishes validation images with branch and SHA tags. These are not release images.
-
----
-
-## Optional PR images
-
-PRs automatically build and scan an amd64 Docker image in CI. Publishing a multi-platform preview image is manual:
-
-1. Wait for CI to pass on the current PR commit.
-2. Go to **Actions** > **PR Image (Manual)** > **Run workflow**.
-3. Select `main` and enter the PR number.
-
-Only open PRs targeting `main` from trusted contributors with branches in this repository can publish images. The workflow verifies successful PR CI for the exact commit before building and publishing `ghcr.io/<owner>/<repo>:pr-<number>-<short-sha>` for amd64 and arm64. Fork PRs remain eligible for the automatic build and scan, but cannot publish images.
+Pushes to `main`, PRs, and draft releases do not build container images.
+To retry a published release, manually run Container Image with its `release_tag`.
+The workflow always builds the tagged commit. An older release retry does not
+replace `latest`.
 
 ---
 
@@ -159,7 +151,7 @@ To deploy a previous version:
 
 ```bash
 # In your production docker-compose.yml or .env, set:
-APP_IMAGE=ghcr.io/bookorbit/bookorbit:X.Y.Z
+APP_IMAGE=ghcr.io/nebularc18/bookorbit:X.Y.Z
 ```
 
 Replace `X.Y.Z` with the version you want to roll back to, then redeploy:
@@ -175,8 +167,8 @@ If a release was created in error and needs to be removed:
 
 ```bash
 # Delete tag locally and remotely
-git tag -d vX.Y.Z
-git push origin :refs/tags/vX.Y.Z
+git tag -d nebularc-vX.Y.Z
+git push origin :refs/tags/nebularc-vX.Y.Z
 ```
 
 Then delete the corresponding GitHub Release from the Releases page.
@@ -185,13 +177,15 @@ Then delete the corresponding GitHub Release from the Releases page.
 
 ## Release Workflow Architecture
 
-PR conventions run only in `ci.yml`. Lint, formatting, type checks, tests, and the PR Docker image scan feed one final **CI Gate**. Nightly CI also includes the E2E suites. Test reports remain available as workflow artifacts without creating separate unit test checks.
+PR conventions run only in `ci.yml`. Lint, formatting, type checks, and tests feed one final **CI Gate**. Nightly CI also includes the E2E suites. Test reports remain available as workflow artifacts without creating separate unit test checks.
 
-The `release.yml` workflow has three jobs:
+The `release.yml` workflow has two jobs:
 
 - **release-dry-run**: Validates semantic-release on PRs that change release configuration, commitlint configuration, root dependencies, the shared setup action, or the release workflow.
 - **release**: Creates the actual release on manual dispatch. Outputs `published`, `version`, and `tag`.
-- **docker-promote**: Builds and pushes the versioned Docker image when a release was published.
+
+The separate `container-image.yml` workflow builds and scans images only after
+release publication, or an explicit retry for a published tag.
 
 ### Concurrency
 
@@ -207,4 +201,4 @@ The `release.yml` workflow has three jobs:
 | ------------------------------- | ------------------------------------------------ |
 | `release.config.js`             | semantic-release config (plugins, release rules) |
 | `commitlint.config.cjs`         | commitlint config (type/scope validation)        |
-| `.github/workflows/release.yml` | Release and Docker publish workflow              |
+| `.github/workflows/release.yml` | Draft release workflow                           |
