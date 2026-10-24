@@ -2,7 +2,7 @@
 
 const { spawnSync } = require("child_process");
 
-const DOCKER_IMAGE = "ghcr.io/bookorbit/bookorbit";
+const DOCKER_IMAGE = "ghcr.io/nebularc18/bookorbit";
 
 const TYPES = [
   { type: "feat", section: "Features" },
@@ -112,11 +112,13 @@ function finalizeContext(ctx) {
           "curl",
           [
             "-s",
-            "-H", `Authorization: Bearer ${ghToken}`,
-            "-H", "X-GitHub-Api-Version: 2022-11-28",
-            `https://api.github.com/repos/${ctx.owner}/${ctx.repository}/commits?per_page=100`
+            "-H",
+            `Authorization: Bearer ${ghToken}`,
+            "-H",
+            "X-GitHub-Api-Version: 2022-11-28",
+            `https://api.github.com/repos/${ctx.owner}/${ctx.repository}/commits?per_page=100`,
           ],
-          { encoding: "utf8" }
+          { encoding: "utf8" },
         );
         if (curlResult.status === 0) {
           const apiCommits = JSON.parse(curlResult.stdout);
@@ -190,8 +192,8 @@ function finalizeContext(ctx) {
 
 module.exports = {
   branches: ["main"],
-  repositoryUrl: "https://github.com/bookorbit/bookorbit",
-  tagFormat: "v${version}",
+  repositoryUrl: "https://github.com/Nebularc18/bookorbit",
+  tagFormat: "nebularc-v${version}",
   plugins: [
     [
       "@semantic-release/commit-analyzer",

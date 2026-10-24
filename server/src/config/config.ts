@@ -11,7 +11,7 @@ export const appConfig = registerAs('app', () => ({
   // a rebranded fork can change it.
   nativeRedirectUri: process.env.NATIVE_REDIRECT_URI?.trim() || 'bookorbit://oauth2-callback',
   version: process.env.APP_VERSION ?? 'Local build',
-  githubReleasesRepo: process.env.GITHUB_RELEASES_REPO?.trim() || 'bookorbit/bookorbit',
+  githubReleasesRepo: process.env.GITHUB_RELEASES_REPO?.trim() || 'Nebularc18/bookorbit',
   githubReleasesToken: process.env.GITHUB_RELEASES_TOKEN?.trim() || undefined,
   oidcAllowLocalIssuers: parseBooleanFlag(process.env.OIDC_ALLOW_LOCAL_ISSUERS, false),
   swaggerEnabled: parseBooleanFlag(process.env.SWAGGER_ENABLED, false),

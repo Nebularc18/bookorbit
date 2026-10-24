@@ -33,6 +33,21 @@ afterEach(() => {
 });
 
 describe('ReleaseNotesService.getSince', () => {
+  it('compares fork tags and caps highlights at the installed fork version', async () => {
+    const service = makeService(
+      [ghRelease('nebularc-v1.2.0', true), ghRelease('nebularc-v1.1.0', true), ghRelease('nebularc-v1.0.0', true)],
+      true,
+      'nebularc-v1.1.0',
+    );
+    const res = await service.getSince('nebularc-v1.0.0');
+    expect(res.releases.map((r) => r.version)).toEqual(['nebularc-v1.1.0']);
+  });
+
+  it('announces the first fork release after an upstream version was marked seen', async () => {
+    const service = makeService([ghRelease('nebularc-v1.0.0', true)], true, 'nebularc-v1.0.0');
+    expect((await service.getSince('v3.5.0')).releases.map((r) => r.version)).toEqual(['nebularc-v1.0.0']);
+  });
+
   it('returns only versions newer than the baseline that have highlights, newest first', async () => {
     const service = makeService([ghRelease('v1.2.0', true), ghRelease('v1.1.0', true), ghRelease('v1.0.0', true)]);
     const res = await service.getSince('v1.0.0');

@@ -36,6 +36,28 @@ function makeGithubResponse(tagName: string, status = 200): Response {
 }
 
 describe('AppInfoService', () => {
+  it.each([
+    ['nebularc-v1.0.0', 'nebularc-v1.0.1', true],
+    ['nebularc-v1.0.0', 'nebularc-v1.0.0', false],
+    ['nebularc-v1.1.0', 'nebularc-v1.0.0', false],
+    ['v3.5.0', 'nebularc-v1.0.0', true],
+    ['nebularc-v1.0.0', 'v3.5.0', false],
+  ])('checks fork updates from %s to %s', async (current, latest, expected) => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(makeGithubResponse(latest));
+    const service = new AppInfoService(makeConfig(current), makeAppSettings(), identity);
+    await service.onApplicationBootstrap();
+    expect((await service.getAppInfo()).updateAvailable).toBe(expected);
+    expect(fetch).toHaveBeenCalledWith(GITHUB_RELEASES_API, expect.any(Object));
+  });
+
+  it('checks the configured release repository', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(makeGithubResponse('nebularc-v1.0.1'));
+    const config = { get: (key: string) => (key === 'app.githubReleasesRepo' ? 'owner/fork' : 'nebularc-v1.0.0') } as unknown as ConfigService;
+    const service = new AppInfoService(config, makeAppSettings(), identity);
+    await service.onApplicationBootstrap();
+    expect(fetch).toHaveBeenCalledWith('https://api.github.com/repos/owner/fork/releases/latest', expect.any(Object));
+  });
+
   let logSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
 

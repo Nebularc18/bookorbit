@@ -4,6 +4,7 @@ import { isAllowedImageHost, isIconNameShape, isNewer, isSemverTag, shouldShowPo
 
 describe('isSemverTag', () => {
   it('accepts release tags and rejects dev builds', () => {
+    expect(isSemverTag('nebularc-v1.0.0')).toBe(true)
     expect(isSemverTag('v1.2.0')).toBe(true)
     expect(isSemverTag('v1.2.0-rc.1')).toBe(true)
     expect(isSemverTag('Local build')).toBe(false)
@@ -14,6 +15,10 @@ describe('isSemverTag', () => {
 
 describe('isNewer', () => {
   it('compares semver precedence', () => {
+    expect(isNewer('nebularc-v1.0.1', 'nebularc-v1.0.0')).toBe(true)
+    expect(isNewer('nebularc-v1.0.0', 'nebularc-v1.0.0')).toBe(false)
+    expect(isNewer('nebularc-v1.0.0', 'v3.5.0')).toBe(true)
+    expect(isNewer('v3.5.0', 'nebularc-v1.0.0')).toBe(false)
     expect(isNewer('v1.2.0', 'v1.1.0')).toBe(true)
     expect(isNewer('v2.0.0', 'v1.9.9')).toBe(true)
     expect(isNewer('v1.1.0', 'v1.1.0')).toBe(false)

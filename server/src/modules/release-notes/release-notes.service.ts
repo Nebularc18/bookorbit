@@ -79,7 +79,7 @@ export class ReleaseNotesService {
     const enabled = await this.appSettingsService.isUpdateCheckEnabled();
     if (!enabled) return [];
 
-    const repo = this.config.get<string>('app.githubReleasesRepo') ?? 'bookorbit/bookorbit';
+    const repo = this.config.get<string>('app.githubReleasesRepo') ?? 'Nebularc18/bookorbit';
     const token = this.config.get<string>('app.githubReleasesToken');
     const url = `https://api.github.com/repos/${repo}/releases?per_page=${RELEASE_NOTES_PER_PAGE}&page=${page}`;
     const start = Date.now();
@@ -238,9 +238,10 @@ export class ReleaseNotesService {
 
   private isNewer(candidate: string, baseline: string): boolean {
     if (!SEMVER_RE.test(candidate)) return false;
-    const a = this.parseSemver(candidate.replace(/^v/, ''));
-    const b = this.parseSemver(baseline.replace(/^v/, ''));
+    const a = this.parseSemver(candidate.replace(/^(?:nebularc-)?v/, ''));
+    const b = this.parseSemver(baseline.replace(/^(?:nebularc-)?v/, ''));
     if (!a || !b) return false;
+    if (candidate.startsWith('nebularc-') !== baseline.startsWith('nebularc-')) return candidate.startsWith('nebularc-');
     if (a[0] !== b[0]) return a[0] > b[0];
     if (a[1] !== b[1]) return a[1] > b[1];
     return a[2] > b[2];

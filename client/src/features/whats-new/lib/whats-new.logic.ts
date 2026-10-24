@@ -1,11 +1,11 @@
 export function isSemverTag(value: string | null | undefined): boolean {
-  return !!value && /^v\d+\.\d+\.\d+/.test(value.trim())
+  return !!value && /^(?:nebularc-)?v\d+\.\d+\.\d+/.test(value.trim())
 }
 
 export function parseSemver(value: string): [number, number, number] | null {
   const match = value
     .trim()
-    .replace(/^v/, '')
+    .replace(/^(?:nebularc-)?v/, '')
     .match(/^(\d+)\.(\d+)\.(\d+)/)
   if (!match) return null
   return [Number(match[1]), Number(match[2]), Number(match[3])]
@@ -15,6 +15,7 @@ export function isNewer(candidate: string, baseline: string): boolean {
   const a = parseSemver(candidate)
   const b = parseSemver(baseline)
   if (!a || !b) return false
+  if (candidate.startsWith('nebularc-') !== baseline.startsWith('nebularc-')) return candidate.startsWith('nebularc-')
   if (a[0] !== b[0]) return a[0] > b[0]
   if (a[1] !== b[1]) return a[1] > b[1]
   return a[2] > b[2]

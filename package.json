@@ -6,10 +6,10 @@
   "homepage": "https://bookorbit.app",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bookorbit/bookorbit"
+    "url": "https://github.com/Nebularc18/bookorbit"
   },
   "bugs": {
-    "url": "https://github.com/bookorbit/bookorbit/issues"
+    "url": "https://github.com/Nebularc18/bookorbit/issues"
   },
   "private": true,
   "packageManager": "pnpm@11.22.0",

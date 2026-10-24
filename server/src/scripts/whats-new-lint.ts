@@ -32,7 +32,7 @@ async function resolveBody(args: string[]): Promise<{ source: string; body: stri
     const tag = args[tagIdx + 1];
     if (!tag) throw new Error('--tag requires a value, e.g. --tag v3.2.0');
     const env = { ...process.env, ...loadEnv() };
-    const repo = env.GITHUB_RELEASES_REPO ?? 'bookorbit/bookorbit';
+    const repo = env.GITHUB_RELEASES_REPO ?? 'Nebularc18/bookorbit';
     const token = env.GITHUB_RELEASES_TOKEN;
     const res = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${tag}`, {
       headers: { Accept: 'application/vnd.github+json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },

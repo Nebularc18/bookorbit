@@ -23,4 +23,4 @@ export const MEDIA_PROBE_CONCURRENCY = 6;
 export const PAGE_CACHE_MAX = 10;
 export const MEDIA_TYPE_CACHE_MAX = 1000;
 
-export const SEMVER_RE = /^v\d+\.\d+\.\d+(?:-[\w.]+)?(?:\+[\w.]+)?$/;
+export const SEMVER_RE = /^(?:nebularc-)?v\d+\.\d+\.\d+(?:-[\w.]+)?(?:\+[\w.]+)?$/;

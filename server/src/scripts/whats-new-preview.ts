@@ -72,7 +72,7 @@ async function main(): Promise<void> {
     else tag = args[i];
   }
 
-  const repo = repoOverride ?? env.GITHUB_RELEASES_REPO ?? 'bookorbit/bookorbit';
+  const repo = repoOverride ?? env.GITHUB_RELEASES_REPO ?? 'Nebularc18/bookorbit';
   const token = env.GITHUB_RELEASES_TOKEN;
   const version = env.APP_VERSION;
 

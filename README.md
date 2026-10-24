@@ -7,11 +7,14 @@
 
 A self-hosted library and reading platform for ebooks, PDFs, audiobooks, and comics.
 
-[![Latest release](https://img.shields.io/github/v/release/bookorbit/bookorbit?label=latest&style=flat-square)](https://github.com/bookorbit/bookorbit/releases)
+This is the Nebularc18 fork. Fork releases use `nebularc-v*` tags. See the
+[fork release guide](docs/fork-releases.md) for versioning and publishing instructions.
+
+[![Latest release](https://img.shields.io/github/v/release/Nebularc18/bookorbit?label=latest&style=flat-square)](https://github.com/Nebularc18/bookorbit/releases)
 [![Stars](https://img.shields.io/github/stars/bookorbit/bookorbit?style=flat-square&color=FFC72C)](https://github.com/bookorbit/bookorbit/stargazers)
 [![GHCR Pulls](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Fbookorbit%2Fbookorbit%2Fbookorbit&query=downloadCount&label=Docker%20Pulls&logo=docker&style=flat-square&color=2496ed)](https://github.com/bookorbit/bookorbit/pkgs/container/bookorbit)
 [![CI](https://img.shields.io/github/actions/workflow/status/bookorbit/bookorbit/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/bookorbit/bookorbit/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/actions/workflow/status/bookorbit/bookorbit/release.yml?style=flat-square&label=release)](https://github.com/bookorbit/bookorbit/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/actions/workflow/status/Nebularc18/bookorbit/release.yml?style=flat-square&label=release)](https://github.com/Nebularc18/bookorbit/actions/workflows/release.yml)
 [![Coverage](https://img.shields.io/codecov/c/github/bookorbit/bookorbit?style=flat-square&flag=server&token=F6TADEFCUV&label=server%20coverage)](https://codecov.io/gh/bookorbit/bookorbit)
 
 [![Website](https://img.shields.io/badge/Website-bookorbit.app-blue?style=flat-square&logo=googlechrome&logoColor=white&color=4169E1)](https://bookorbit.app)
@@ -112,8 +115,8 @@ Take your library anywhere with the official native BookOrbit app. Read ebooks, 
 ```bash
 mkdir bookorbit && cd bookorbit
 mkdir -p books data/app data/postgres
-curl -fsSLo .env https://raw.githubusercontent.com/bookorbit/bookorbit/main/.env.example
-curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/bookorbit/bookorbit/main/docker-compose.yml
+curl -fsSLo .env https://raw.githubusercontent.com/Nebularc18/bookorbit/main/.env.example
+curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/Nebularc18/bookorbit/main/docker-compose.yml
 ```
 
 Edit `.env` and set these required values:
