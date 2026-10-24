@@ -470,6 +470,33 @@ describe('date field value validation', () => {
 });
 
 describe('groupRuleSchema depth enforcement', () => {
+  it('rejects oversized rule groups before inspecting their elements', () => {
+    let reads = 0;
+    const rule = new Proxy(
+      {},
+      {
+        get: () => {
+          reads++;
+          return undefined;
+        },
+      },
+    );
+    const result = groupRuleSchema(5).safeParse({ type: 'group', join: 'AND', rules: Array(2000).fill(rule) });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toHaveLength(1);
+      expect(result.error.issues[0]).toMatchObject({ code: 'too_big', path: ['rules'] });
+    }
+    expect(reads).toBe(0);
+  });
+
+  it('accepts 100 rules and enforces the same bound in nested groups', () => {
+    const rule = { type: 'rule', field: 'title', operator: 'contains', value: 'x' };
+    const group = { type: 'group', join: 'AND', rules: Array(100).fill(rule) };
+    expect(groupRuleSchema(5).safeParse(group).success).toBe(true);
+    expect(groupRuleSchema(5).safeParse({ ...group, rules: [{ ...group, rules: Array(101).fill(rule) }] }).success).toBe(false);
+  });
+
   it('groups at depth 5 are valid', () => {
     const schema = groupRuleSchema(5);
     const result = schema.safeParse({

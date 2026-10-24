@@ -443,6 +443,20 @@ describe('UserPreferencesService', () => {
     expect(repo.upsert).toHaveBeenCalledWith(11, 'theme', validThemePreferences);
   });
 
+  it('rejects oversized card overlays before inspecting their elements', async () => {
+    const cardOverlays = Array(2000).fill('unknown');
+    let reads = 0;
+    Object.defineProperty(cardOverlays, '0', {
+      get: () => {
+        reads++;
+        return 'unknown';
+      },
+    });
+    await expect(service.upsertDisplayPreferences(11, { ...validDisplayPreferences, cardOverlays })).rejects.toBeInstanceOf(BadRequestException);
+    expect(reads).toBe(0);
+    expect(repo.upsert).not.toHaveBeenCalled();
+  });
+
   it('upsertDisplayPreferences persists validated settings', async () => {
     await expect(service.upsertDisplayPreferences(11, validDisplayPreferences as unknown as Record<string, unknown>)).resolves.toBeUndefined();
     expect(repo.upsert).toHaveBeenCalledWith(11, 'display', validDisplayPreferences);
