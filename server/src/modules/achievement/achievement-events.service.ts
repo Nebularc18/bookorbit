@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter } from 'events';
 import type { ReadingSessionSource } from '@bookorbit/types';
+
+import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
 
 export const ACHIEVEMENT_EVENT_READING_SESSION_SAVED = 'reading-session.saved';
 export const ACHIEVEMENT_EVENT_BOOK_STATUS_CHANGED = 'book.status-changed';
@@ -80,4 +82,19 @@ export type AchievementEventPayload =
   | BookHardcoverEditionChangedPayload;
 
 @Injectable()
-export class AchievementEventsService extends EventEmitter {}
+export class AchievementEventsService extends EventEmitter {
+  private readonly logger = new Logger(AchievementEventsService.name);
+
+  notifyBookProgressChanged(payload: BookProgressChangedPayload): void {
+    const startedAt = Date.now();
+    try {
+      this.emit(ACHIEVEMENT_EVENT_BOOK_PROGRESS_CHANGED, payload);
+    } catch (error: unknown) {
+      const errorClass = error instanceof Error ? error.constructor.name : 'Error';
+      const message = sanitizeLogValue(error instanceof Error ? error.message : String(error));
+      this.logger.warn(
+        `[book.progress_notification] [fail] userId=${payload.userId} bookId=${payload.bookId} durationMs=${Date.now() - startedAt} errorClass=${errorClass} error="${message}" - saved progress notification failed`,
+      );
+    }
+  }
+}

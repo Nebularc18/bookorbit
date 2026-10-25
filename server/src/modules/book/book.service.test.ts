@@ -236,6 +236,7 @@ function makeService(
     performRename: vi.fn(),
   };
   const achievementEvents = {
+    notifyBookProgressChanged: vi.fn(),
     emit: vi.fn(),
   };
   const narratorService = {
@@ -3210,6 +3211,54 @@ describe('BookService', () => {
   });
 
   describe('saveProgress - positionSeconds', () => {
+    it('notifies intermediate ebook progress without a status change or a reading session', async () => {
+      const { service, bookRepo, libraryService, achievementEvents } = makeService();
+      const user = makeUser();
+      bookRepo.findFileById.mockResolvedValue({ id: 8, bookId: 11, libraryId: 2, absolutePath: '/books/b.epub', format: 'epub' });
+      bookRepo.findProgress.mockResolvedValue({ percentage: 30 });
+      libraryService.findOne = vi.fn().mockResolvedValue({ readingThreshold: 3, markAsFinishedPercentComplete: 97 });
+
+      await service.saveProgress(user.id, 8, { percentage: 50 }, user);
+
+      expect(achievementEvents.notifyBookProgressChanged).toHaveBeenCalledExactlyOnceWith({
+        userId: user.id,
+        bookId: 11,
+        bookFileId: 8,
+        progress: 50,
+        source: 'web_reader',
+      });
+      expect(achievementEvents.emit).not.toHaveBeenCalled();
+    });
+
+    it('notifies the stored text percentage when narration resumes behind the reader', async () => {
+      const { service, bookRepo, libraryService, achievementEvents } = makeService();
+      const user = makeUser();
+      bookRepo.findFileById.mockResolvedValue({ id: 8, bookId: 11, libraryId: 2, absolutePath: '/books/b.epub', format: 'epub' });
+      bookRepo.findProgress.mockResolvedValue({ percentage: 60, cfi: null, pageNumber: null });
+      libraryService.findOne = vi.fn().mockResolvedValue({ readingThreshold: 3, markAsFinishedPercentComplete: 97 });
+
+      await service.saveProgress(user.id, 8, { percentage: 20, source: 'narration' }, user);
+
+      expect(achievementEvents.notifyBookProgressChanged).toHaveBeenCalledExactlyOnceWith({
+        userId: user.id,
+        bookId: 11,
+        bookFileId: 8,
+        progress: 60,
+        source: 'web_reader',
+      });
+    });
+
+    it('does not notify progress for a failed ebook write', async () => {
+      const { service, bookRepo, achievementEvents } = makeService();
+      const user = makeUser();
+      bookRepo.findFileById.mockResolvedValue({ id: 8, bookId: 11, libraryId: 2, absolutePath: '/books/b.epub', format: 'epub' });
+      bookRepo.upsertProgress.mockRejectedValue(new Error('database unavailable'));
+
+      await expect(service.saveProgress(user.id, 8, { percentage: 50 }, user)).rejects.toThrow('database unavailable');
+
+      expect(achievementEvents.notifyBookProgressChanged).not.toHaveBeenCalled();
+    });
+
     it('passes positionSeconds from DTO to repo', async () => {
       const { service, bookRepo, libraryService } = makeService();
       const user = makeUser();

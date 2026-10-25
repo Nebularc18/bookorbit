@@ -16,6 +16,7 @@ import {
 import type { RequestUser } from '../../common/types/request-user';
 import { compareAudioTracks } from '../../common/utils/book-media.utils';
 import type { BookmarkRow } from '../../db/schema';
+import { AchievementEventsService } from '../achievement/achievement-events.service';
 import { BookService } from '../book/book.service';
 import type { CreateAudiobookBookmarkDto } from './dto/create-audiobook-bookmark.dto';
 import type { PutAudiobookPlaybackStateDto } from './dto/put-audiobook-playback-state.dto';
@@ -40,6 +41,7 @@ export class AudiobookService {
   constructor(
     private readonly repo: AudiobookRepository,
     private readonly bookService: BookService,
+    private readonly achievementEvents: AchievementEventsService,
   ) {}
 
   async getManifest(bookId: number, user: RequestUser): Promise<AudiobookManifest> {
@@ -86,6 +88,14 @@ export class AudiobookService {
     const previous = await this.repo.findPlaybackState(user.id, bookId);
     if (previous?.operationId === dto.operationId) {
       const existing = (await this.getPlaybackState(bookId, user))!;
+      // Re-notify on replay so a failed downstream notification can be retried without recording activity again.
+      this.achievementEvents.notifyBookProgressChanged({
+        userId: user.id,
+        bookId,
+        bookFileId: previous.currentFileId,
+        progress: previous.percentage,
+        source: 'web_reader',
+      });
       await this.bookService.syncEbookProgressForAudiobookPlayback(
         user,
         bookId,
@@ -121,6 +131,14 @@ export class AudiobookService {
         ? await this.repo.createPlaybackState(user.id, bookId, values)
         : await this.repo.updatePlaybackState(user.id, bookId, dto.baseRevision, values);
     if (!saved) throw new ConflictException('Playback state revision conflict');
+
+    this.achievementEvents.notifyBookProgressChanged({
+      userId: user.id,
+      bookId,
+      bookFileId: values.currentFileId,
+      progress: percentage,
+      source: 'web_reader',
+    });
 
     const strongRereadEvidence = previous !== null && previous.percentage - percentage >= 10;
     await this.bookService.autoUpdateReadStatusForProgress(

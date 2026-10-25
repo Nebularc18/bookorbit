@@ -2,6 +2,13 @@ import { BadRequestException, ConflictException, PreconditionFailedException } f
 import { AUDIOBOOK_MANIFEST_SCHEMA, AUDIOBOOK_MANIFEST_VERSION } from '@bookorbit/types';
 
 import type { RequestUser } from '../../common/types/request-user';
+import {
+  AchievementEventsService,
+  ACHIEVEMENT_EVENT_BOOK_PROGRESS_CHANGED,
+  ACHIEVEMENT_EVENT_READING_SESSION_SAVED,
+} from '../achievement/achievement-events.service';
+import { HardcoverEventListener } from '../hardcover/hardcover-event-listener.service';
+import { HardcoverAutoSyncSchedulerService, HARDCOVER_AUTO_SYNC_DEBOUNCE_MS } from '../hardcover/hardcover-auto-sync-scheduler.service';
 import { AudiobookService } from './audiobook.service';
 
 const FIRST_PUBLIC_ID = '11111111-1111-4111-8111-111111111111';
@@ -84,14 +91,117 @@ function makeFixture() {
     autoUpdateReadStatusForProgress: vi.fn().mockResolvedValue(undefined),
     syncEbookProgressForAudiobookPlayback: vi.fn().mockResolvedValue(undefined),
   };
+  const events = new AchievementEventsService();
+  const progressChanged = vi.fn();
+  const sessionSaved = vi.fn();
+  events.on(ACHIEVEMENT_EVENT_BOOK_PROGRESS_CHANGED, progressChanged);
+  events.on(ACHIEVEMENT_EVENT_READING_SESSION_SAVED, sessionSaved);
   return {
     repo,
     bookService,
-    service: new AudiobookService(repo as never, bookService as never),
+    events,
+    progressChanged,
+    sessionSaved,
+    service: new AudiobookService(repo as never, bookService as never, events),
   };
 }
 
 describe('AudiobookService', () => {
+  it.each([true, false])('routes intermediate position updates through Hardcover with progress auto-sync=%s', async (enabled) => {
+    vi.useFakeTimers();
+    try {
+      const { service, repo, bookService, events, sessionSaved } = makeFixture();
+      const syncBook = vi.fn().mockResolvedValue(undefined);
+      const settings = { getSettings: vi.fn().mockResolvedValue({ effectiveEnabled: true, autoSyncOnProgressUpdate: enabled }) };
+      const scheduler = new HardcoverAutoSyncSchedulerService(settings as never, { syncBook } as never, {} as never);
+      const listener = new HardcoverEventListener(events, scheduler, {} as never);
+      listener.onModuleInit();
+      const manifest = await service.getManifest(30, makeUser());
+      repo.findPlaybackState.mockResolvedValue({ percentage: 20, operationId: 'old-operation' });
+      repo.updatePlaybackState.mockImplementation((_userId, _bookId, revision, values) => Promise.resolve({ ...values, revision: revision + 1 }));
+      const dto = {
+        assetId: manifest.assets[0]!.assetId,
+        positionMs: 7_000,
+        capturedAt: '2026-02-01T00:00:00.000Z',
+        operationId: '33333333-3333-4333-8333-333333333333',
+        baseRevision: 2,
+        manifestRevision: manifest.revision,
+      };
+      await service.putPlaybackState(30, dto, makeUser());
+      await service.putPlaybackState(
+        30,
+        { ...dto, operationId: '44444444-4444-4444-8444-444444444444', positionMs: 8_000, baseRevision: 3 },
+        makeUser(),
+      );
+      expect(syncBook).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(HARDCOVER_AUTO_SYNC_DEBOUNCE_MS);
+      expect(syncBook).toHaveBeenCalledTimes(enabled ? 1 : 0);
+      if (enabled) expect(syncBook).toHaveBeenCalledWith(7, 30);
+      expect(bookService.autoUpdateReadStatusForProgress).toHaveBeenCalledTimes(2);
+      expect(sessionSaved).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a failed notification on replay without repeating writes or reading activity', async () => {
+    const { service, repo, bookService, events, sessionSaved } = makeFixture();
+    const manifest = await service.getManifest(30, makeUser());
+    const notify = vi.fn().mockImplementationOnce(() => {
+      throw new Error('notification unavailable');
+    });
+    events.on(ACHIEVEMENT_EVENT_BOOK_PROGRESS_CHANGED, notify);
+    const dto = {
+      assetId: manifest.assets[0]!.assetId,
+      positionMs: 7_000,
+      capturedAt: '2026-02-01T00:00:00.000Z',
+      operationId: '33333333-3333-4333-8333-333333333333',
+      baseRevision: 0,
+      manifestRevision: manifest.revision,
+    };
+    repo.createPlaybackState.mockImplementation((_userId, _bookId, values) => {
+      const saved = { ...values, revision: 1 };
+      repo.findPlaybackState.mockResolvedValue(saved);
+      return Promise.resolve(saved);
+    });
+    const first = await service.putPlaybackState(30, dto, makeUser());
+    expect(await service.putPlaybackState(30, dto, makeUser())).toEqual(first);
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(repo.createPlaybackState).toHaveBeenCalledTimes(1);
+    expect(repo.updatePlaybackState).not.toHaveBeenCalled();
+    expect(bookService.autoUpdateReadStatusForProgress).toHaveBeenCalledTimes(1);
+    expect(sessionSaved).not.toHaveBeenCalled();
+  });
+
+  it('retries downstream EPUB sync after a committed write without repeating reading activity', async () => {
+    const { service, repo, bookService, progressChanged, sessionSaved } = makeFixture();
+    const manifest = await service.getManifest(30, makeUser());
+    const dto = {
+      assetId: manifest.assets[0]!.assetId,
+      positionMs: 7_000,
+      capturedAt: '2026-02-01T00:00:00.000Z',
+      operationId: '33333333-3333-4333-8333-333333333333',
+      baseRevision: 0,
+      manifestRevision: manifest.revision,
+    };
+    repo.createPlaybackState.mockImplementation((_userId, _bookId, values) => {
+      const saved = { ...values, revision: 1 };
+      repo.findPlaybackState.mockResolvedValue(saved);
+      return Promise.resolve(saved);
+    });
+    bookService.syncEbookProgressForAudiobookPlayback.mockRejectedValueOnce(new Error('EPUB sync unavailable'));
+
+    await expect(service.putPlaybackState(30, dto, makeUser())).rejects.toThrow('EPUB sync unavailable');
+    await expect(service.putPlaybackState(30, dto, makeUser())).resolves.toMatchObject({ revision: 1, positionMs: 7_000 });
+
+    expect(repo.createPlaybackState).toHaveBeenCalledTimes(1);
+    expect(repo.updatePlaybackState).not.toHaveBeenCalled();
+    expect(bookService.autoUpdateReadStatusForProgress).toHaveBeenCalledTimes(1);
+    expect(bookService.syncEbookProgressForAudiobookPlayback).toHaveBeenCalledTimes(2);
+    expect(progressChanged).toHaveBeenCalledTimes(2);
+    expect(sessionSaved).not.toHaveBeenCalled();
+  });
+
   it('builds a versioned manifest with stable opaque assets and full chapter ranges', async () => {
     const { service, bookService } = makeFixture();
 
@@ -124,7 +234,7 @@ describe('AudiobookService', () => {
   });
 
   it('derives percentage and creates revision one from a matching manifest write', async () => {
-    const { service, repo, bookService } = makeFixture();
+    const { service, repo, bookService, progressChanged } = makeFixture();
     const manifest = await service.getManifest(30, makeUser());
     repo.createPlaybackState.mockResolvedValue({
       capturedAt: new Date('2026-02-01T00:00:00.000Z'),
@@ -146,6 +256,7 @@ describe('AudiobookService', () => {
 
     expect(saved.percentage).toBeCloseTo((15_125 / 30_125) * 100);
     expect(saved.revision).toBe(1);
+    expect(progressChanged).toHaveBeenCalledWith({ userId: 7, bookId: 30, bookFileId: 12, progress: saved.percentage, source: 'web_reader' });
     expect(repo.createPlaybackState).toHaveBeenCalledWith(
       7,
       30,
@@ -228,8 +339,8 @@ describe('AudiobookService', () => {
     );
   });
 
-  it('retries EPUB sync for an idempotent replay without writing a second audiobook revision', async () => {
-    const { service, repo, bookService } = makeFixture();
+  it('retries notifications and EPUB sync for an idempotent replay without recording activity again', async () => {
+    const { service, repo, bookService, progressChanged, sessionSaved } = makeFixture();
     const manifest = await service.getManifest(30, makeUser());
     const capturedAt = new Date('2026-02-01T00:00:00.000Z');
     repo.findPlaybackState.mockResolvedValue({
@@ -258,13 +369,16 @@ describe('AudiobookService', () => {
     );
 
     expect(result).toMatchObject({ revision: 4, positionMs: 2_000 });
+    expect(progressChanged).toHaveBeenCalledExactlyOnceWith({ userId: 7, bookId: 30, bookFileId: 11, progress: 6.63, source: 'web_reader' });
+    expect(bookService.autoUpdateReadStatusForProgress).not.toHaveBeenCalled();
+    expect(sessionSaved).not.toHaveBeenCalled();
     expect(repo.createPlaybackState).not.toHaveBeenCalled();
     expect(repo.updatePlaybackState).not.toHaveBeenCalled();
     expect(bookService.syncEbookProgressForAudiobookPlayback).toHaveBeenCalledWith(makeUser(), 30, 11, 2, 6.63, capturedAt);
   });
 
-  it('rejects stale manifests, unknown assets, and revision conflicts', async () => {
-    const { service, repo } = makeFixture();
+  it('rejects stale manifests, unknown assets, and revision conflicts without notifying progress', async () => {
+    const { service, repo, progressChanged } = makeFixture();
     const manifest = await service.getManifest(30, makeUser());
     const base = {
       assetId: manifest.assets[0]!.assetId,
@@ -284,6 +398,9 @@ describe('AudiobookService', () => {
 
     repo.createPlaybackState.mockResolvedValue(null);
     await expect(service.putPlaybackState(30, base, makeUser())).rejects.toThrow(ConflictException);
+    repo.updatePlaybackState.mockResolvedValue(null);
+    await expect(service.putPlaybackState(30, { ...base, baseRevision: 3 }, makeUser())).rejects.toThrow(ConflictException);
+    expect(progressChanged).not.toHaveBeenCalled();
   });
 
   it('accepts a position in the rounded-off tail of a track and stores it clamped to the duration', async () => {
