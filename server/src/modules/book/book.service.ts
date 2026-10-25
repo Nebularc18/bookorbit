@@ -2434,6 +2434,13 @@ export class BookService {
       dto.source === 'narration' ? { percentage: dto.percentage, updatedAt: now } : null,
       text.moved ? now : null,
     );
+    this.achievementEvents?.notifyBookProgressChanged({
+      userId,
+      bookId: file.bookId,
+      bookFileId: fileId,
+      progress: text.percentage,
+      source: 'web_reader',
+    });
     // Everything downstream reads the position the file now holds, not the one the client sent.
     // A narration write that did not move the text position must not move a Kobo bookmark, an
     // audiobook position, or a read status either.
