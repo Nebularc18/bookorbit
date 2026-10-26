@@ -292,7 +292,8 @@ export class IndexerConfigService {
       isbnSearchDisabled: row.isbnSearchDisabled,
       settings: row.settings ?? null,
       networkProfile: manager?.networkProfile ?? row.networkProfile ?? null,
-      perIndexerTimeoutSeconds: manager?.perIndexerTimeoutSeconds ?? 20,
+      // Shelfmark searches sources sequentially and allows 300s for protection challenges.
+      perIndexerTimeoutSeconds: manager?.perIndexerTimeoutSeconds ?? (row.adapterType === 'shelfmark' ? 330 : 20),
       overallSearchBudgetSeconds: manager?.overallSearchBudgetSeconds ?? null,
       autoExpandCategories: manager?.autoExpandCategories ?? false,
     };

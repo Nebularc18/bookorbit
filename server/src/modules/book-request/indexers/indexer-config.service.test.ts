@@ -109,6 +109,23 @@ function makeService(
 const createDto = { name: 'jackett', adapterType: 'torznab' as const, baseUrl: 'http://203.0.113.10:9117' };
 
 describe('IndexerConfigService', () => {
+  it('allows Shelfmark its full search budget for both initial search and candidate refresh', async () => {
+    const shelfmark = indexerRow({ adapterType: 'shelfmark' });
+    const { service } = makeService({
+      repo: {
+        findAllEnabled: vi.fn().mockResolvedValue([shelfmark]),
+        findById: vi.fn().mockResolvedValue(shelfmark),
+      },
+    });
+    await expect(service.resolveEnabledConfigs()).resolves.toEqual([expect.objectContaining({ perIndexerTimeoutSeconds: 330 })]);
+    await expect(service.resolveConfig(9)).resolves.toEqual(expect.objectContaining({ perIndexerTimeoutSeconds: 330 }));
+  });
+
+  it('keeps the existing timeout for other standalone sources', async () => {
+    const { service } = makeService();
+    await expect(service.resolveConfig(9)).resolves.toEqual(expect.objectContaining({ perIndexerTimeoutSeconds: 20 }));
+  });
+
   it('resolves a managed child with its manager credential and policy', async () => {
     const managed = indexerRow({
       managerId: 3,
