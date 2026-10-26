@@ -3,7 +3,7 @@ import { safeFetch } from '../../../../common/utils/safe-fetch';
 import type { ResolvedIndexerConfig } from '../indexer-adapter';
 
 vi.mock('../../../../common/utils/safe-fetch', () => ({ safeFetch: vi.fn() }));
-vi.mock('../../../../common/utils/ssrf.utils', () => ({ ensureSafeUrl: vi.fn(async (url: string) => new URL(url)) }));
+vi.mock('../../../../common/utils/ssrf.utils', () => ({ ensureSafeUrl: vi.fn((url: string) => Promise.resolve(new URL(url))) }));
 
 const config = {
   id: 10,
