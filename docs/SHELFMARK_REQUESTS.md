@@ -19,3 +19,5 @@ Progress includes Shelfmark's download followed by copying the file into BookOrb
 Cancelling stops the matching active Shelfmark job and removes BookOrbit's staged copy. Import cleanup removes only BookOrbit's copy. It does not delete Shelfmark's original files or stop a torrent seeding there.
 
 BookOrbit resumes polling saved Shelfmark attempts after its own restart. An interrupted copy restarts from the completed Shelfmark file. Do not dismiss or remove that file in Shelfmark while BookOrbit is still working on it. An existing active job started outside BookOrbit is refused to avoid taking ownership of somebody else's download; a matching completed file can be reused.
+
+Release searches allow 330 seconds because Shelfmark searches enabled sources sequentially and its default search budget is 300 seconds. Status checks and download submissions retain their 30-second API timeout. The first search may take longer while Shelfmark clears a source protection challenge.

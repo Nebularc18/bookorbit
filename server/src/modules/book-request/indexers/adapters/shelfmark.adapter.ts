@@ -18,6 +18,8 @@ import type { ShelfmarkRelease, ShelfmarkStatus } from './shelfmark.types';
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_RELEASES = 100;
 const API_TIMEOUT_MS = 30_000;
+// Keep release searches alive beyond Shelfmark's default 300s search budget.
+const SEARCH_TIMEOUT_MS = 330_000;
 
 @Injectable()
 export class ShelfmarkAdapter implements IndexerAdapter {
@@ -87,6 +89,7 @@ export class ShelfmarkAdapter implements IndexerAdapter {
   private async call<T>(config: ResolvedIndexerConfig, path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
     const startedAt = Date.now();
     const operation = init.method ?? 'GET';
+    const timeoutMs = path.startsWith('/api/releases?') ? SEARCH_TIMEOUT_MS : API_TIMEOUT_MS;
     if (path !== '/api/status') this.logger.log(`[shelfmark.api] [start] indexerId=${config.id} method=${operation} - Shelfmark API call started`);
     try {
       if (!config.credential) throw new IndexerSearchException('unauthorized', 'Set the Shelfmark API key in this source');
@@ -96,7 +99,7 @@ export class ShelfmarkAdapter implements IndexerAdapter {
         {
           ...init,
           redirect: 'manual',
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(API_TIMEOUT_MS)]) : AbortSignal.timeout(API_TIMEOUT_MS),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
           headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Api-Key': config.credential },
         },
         { allowPrivate: config.allowPrivateAddress, profile: config.networkProfile, pinResolvedAddress: true },
