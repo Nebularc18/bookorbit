@@ -714,7 +714,65 @@ const currentChapter = computed<AudiobookManifestChapter | null>(() => {
   return current
 })
 
+const chaptersListEl = ref<HTMLDivElement | null>(null)
+
+function toggleChapters() {
+  showChapters.value = !showChapters.value
+}
+
+function closeChapters() {
+  showChapters.value = false
+}
+
+function selectChaptersTab() {
+  chaptersTab.value = 'chapters'
+}
+
+function selectBookmarksTab() {
+  chaptersTab.value = 'bookmarks'
+}
+
+watch(
+  [showChapters, chaptersTab],
+  ([open, tab]) => {
+    if (!open || tab !== 'chapters') return
+    const list = chaptersListEl.value
+    const activeChapter = list?.querySelector<HTMLElement>('[aria-current="true"]')
+    if (!list || !activeChapter) return
+    const listBounds = list.getBoundingClientRect()
+    const chapterBounds = activeChapter.getBoundingClientRect()
+    list.scrollTop = Math.max(0, list.scrollTop + chapterBounds.top - listBounds.top - (listBounds.height - chapterBounds.height) / 2)
+  },
+  { flush: 'post' },
+)
+
 const chapterProgress = useAudioChapterProgress(currentChapter, absolutePositionMs, settings.playbackSpeed)
+
+const chapterSeek = ref<{ chapter: AudiobookManifestChapter; percentage: number } | null>(null)
+const chapterScrubberPercentage = computed(() => chapterSeek.value?.percentage ?? chapterProgress.percentage.value)
+const chapterRemainingSeconds = computed(() => {
+  if (!chapterSeek.value) return chapterProgress.remainingSeconds.value
+  const { chapter, percentage } = chapterSeek.value
+  return Math.ceil(((chapter.endMs - chapter.startMs) * (1 - percentage / 100)) / 1000 / settings.playbackSpeed.value)
+})
+
+function handleChapterInput(event: Event) {
+  const chapter = chapterSeek.value?.chapter ?? currentChapter.value
+  if (!chapter || chapter.endMs <= chapter.startMs) return
+  chapterSeek.value = { chapter, percentage: Number((event.target as HTMLInputElement).value) }
+}
+
+function handleChapterChange(event: Event) {
+  handleChapterInput(event)
+  if (!chapterSeek.value) return
+  const { chapter, percentage } = chapterSeek.value
+  chapterSeek.value = null
+  seekToAbsoluteSeconds((chapter.startMs + ((chapter.endMs - chapter.startMs) * percentage) / 100) / 1000)
+}
+
+function cancelChapterSeek() {
+  chapterSeek.value = null
+}
 
 const scrubberHoverChapter = computed<AudiobookManifestChapter | null>(() => {
   if (scrubberHoverSeconds.value === null) return null
@@ -941,20 +999,28 @@ onMounted(async () => {
             <div class="flex items-center justify-between gap-3 text-xs mb-2">
               <span class="min-w-0 truncate font-medium uppercase tracking-widest opacity-60">{{ currentChapter?.title }}</span>
               <span class="shrink-0 tabular-nums opacity-60">{{
-                t('reader.audiobook.timeLeft', { time: formatTime(chapterProgress.remainingSeconds.value) })
+                t('reader.audiobook.timeLeft', { time: formatTime(chapterRemainingSeconds) })
               }}</span>
             </div>
-            <div
-              role="progressbar"
-              :aria-label="currentChapter?.title"
-              :aria-valuenow="chapterProgress.percentage.value"
-              :aria-valuemin="0"
-              :aria-valuemax="100"
-              :aria-valuetext="t('reader.audiobook.timeLeft', { time: formatTime(chapterProgress.remainingSeconds.value) })"
-              class="relative h-1 rounded-full overflow-hidden"
-            >
-              <div class="absolute inset-0 bg-current opacity-20" />
-              <div class="absolute inset-y-0 left-0 rounded-full bg-current" :style="{ width: chapterProgress.percentage.value + '%' }" />
+            <div class="relative py-3 -my-3 rounded-full focus-within:ring-2 focus-within:ring-current">
+              <div class="relative h-1 rounded-full overflow-hidden pointer-events-none">
+                <div class="absolute inset-0 bg-current opacity-20" />
+                <div class="absolute inset-y-0 left-0 rounded-full bg-current" :style="{ width: chapterScrubberPercentage + '%' }" />
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="0.1"
+                :value="chapterScrubberPercentage"
+                :aria-label="currentChapter?.title"
+                :aria-valuetext="t('reader.audiobook.timeLeft', { time: formatTime(chapterRemainingSeconds) })"
+                class="absolute inset-0 w-full h-full opacity-0 cursor-pointer touch-none"
+                @input="handleChapterInput"
+                @change="handleChapterChange"
+                @pointercancel="cancelChapterSeek"
+                @blur="cancelChapterSeek"
+              />
             </div>
           </div>
 
@@ -1092,7 +1158,7 @@ onMounted(async () => {
             <!-- Chapters / Bookmarks -->
             <button
               class="flex flex-col items-center gap-1 px-4 py-2 rounded-2xl hover:bg-white/10 transition-colors text-white/65"
-              @click="showChapters = !showChapters"
+              @click="toggleChapters"
             >
               <BookOpen class="w-5 h-5" />
               <span class="text-[10px] font-medium tracking-wide">{{ t('reader.audiobook.chapters') }}</span>
@@ -1217,7 +1283,7 @@ onMounted(async () => {
 
       <!-- Chapter sheet backdrop -->
       <Transition name="fade">
-        <div v-if="showChapters" class="absolute inset-0 z-20 bg-scrim" @click="showChapters = false" />
+        <div v-if="showChapters" class="absolute inset-0 z-20 bg-scrim" @click="closeChapters" />
       </Transition>
 
       <!-- Chapter / Bookmarks sheet (slide up) -->
@@ -1232,29 +1298,30 @@ onMounted(async () => {
               <button
                 class="px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
                 :class="chaptersTab === 'chapters' ? 'bg-primary/25 text-primary' : 'text-white/50 hover:text-white/80 hover:bg-white/10'"
-                @click="chaptersTab = 'chapters'"
+                @click="selectChaptersTab"
               >
                 {{ t('reader.audiobook.chapters') }}
               </button>
               <button
                 class="px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
                 :class="chaptersTab === 'bookmarks' ? 'bg-primary/25 text-primary' : 'text-white/50 hover:text-white/80 hover:bg-white/10'"
-                @click="chaptersTab = 'bookmarks'"
+                @click="selectBookmarksTab"
               >
                 {{ t('reader.audiobook.bookmarks') }}
               </button>
             </div>
-            <button class="p-1.5 hover:bg-white/10 rounded-full transition-colors" @click="showChapters = false">
+            <button class="p-1.5 hover:bg-white/10 rounded-full transition-colors" @click="closeChapters">
               <X class="w-4 h-4" />
             </button>
           </div>
 
           <!-- Chapters list -->
-          <div v-if="chaptersTab === 'chapters'" class="flex-1 overflow-y-auto">
+          <div v-if="chaptersTab === 'chapters'" ref="chaptersListEl" class="flex-1 overflow-y-auto">
             <div v-if="manifest?.chapters.length">
               <button
                 v-for="(chapter, i) in manifest.chapters"
                 :key="chapter.startMs"
+                :aria-current="currentChapter?.startMs === chapter.startMs ? 'true' : undefined"
                 class="w-full text-left px-5 py-3 hover:bg-white/10 transition-colors text-sm"
                 :class="currentChapter?.startMs === chapter.startMs ? 'text-white font-semibold' : 'text-white/65'"
                 @click="seekToChapter(chapter)"
