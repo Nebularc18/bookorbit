@@ -297,7 +297,7 @@ describe('AudiobookReaderView', () => {
     const view = await mountView()
     const bookBar = view.get('.scrubber-rail')
     vi.spyOn(bookBar.element, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 100 } as DOMRect)
-    Object.assign(bookBar.element, { setPointerCapture: vi.fn() })
+    Object.assign(bookBar.element, { setPointerCapture: vi.fn<(pointerId: number) => void>() })
     bookBar.element.dispatchEvent(new MouseEvent('pointerdown', { clientX: 20 }))
     bookBar.element.dispatchEvent(new MouseEvent('pointerup', { clientX: 20 }))
     await flushPromises()
