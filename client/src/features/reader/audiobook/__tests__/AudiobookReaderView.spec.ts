@@ -16,6 +16,9 @@ const COVER_VERSION = 'ebook:2026-09-20T10:00:00.000Z:2026-09-21T12:30:00.000Z'
 const ARTWORK_URL = 'blob:audio-artwork'
 
 const mocks = vi.hoisted(() => ({
+  resumePosition: null as number | null,
+  seek: vi.fn<(positionSeconds: number) => void>(),
+  activateIndex: vi.fn<(index: number, positionSeconds: number) => void>(),
   api: vi.fn<(input: string) => Promise<{ ok: boolean; json: () => Promise<unknown> }>>(),
   coverUrl: vi.fn<CoverUrl>(),
   createCoverFillArtworkUrl: vi.fn<(src: string, size?: number) => Promise<string | null>>(),
@@ -47,8 +50,8 @@ vi.mock('@/features/book/lib/cover-fill-artwork', () => ({ createCoverFillArtwor
 
 vi.mock('../composables/useAudioProgress', () => ({
   useAudioProgress: () => ({
-    resumeAssetId: ref<string | null>(null),
-    resumePosition: ref(0),
+    resumeAssetId: ref<string | null>(mocks.resumePosition === null ? null : 'asset-1'),
+    resumePosition: ref(mocks.resumePosition ?? 0),
     revision: ref(0),
     loaded: ref(true),
     load: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
@@ -62,10 +65,10 @@ vi.mock('../composables/useAudioQueue', () => ({
     currentIndex: ref(0),
     isPlaying: ref(false),
     loadError: (activeQueueLoadError = ref<string | null>(null)),
-    activateIndex: vi.fn<(index: number, positionSeconds: number) => void>(),
+    activateIndex: mocks.activateIndex,
     play: vi.fn<() => void>(),
     pause: vi.fn<() => void>(),
-    seek: vi.fn<(positionSeconds: number) => void>(),
+    seek: mocks.seek,
     position: vi.fn<() => number>().mockReturnValue(0),
     setSpeed: vi.fn<(rate: number) => void>(),
     setVolume: vi.fn<(volume: number) => void>(),
@@ -255,6 +258,7 @@ async function mountView() {
 describe('AudiobookReaderView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.resumePosition = null
     activeQueueLoadError = null
     mocks.createCoverFillArtworkUrl.mockResolvedValue(ARTWORK_URL)
     vi.stubGlobal(
@@ -268,6 +272,7 @@ describe('AudiobookReaderView', () => {
   afterEach(() => {
     wrapper?.unmount()
     wrapper = null
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
     Reflect.deleteProperty(navigator, 'mediaSession')
   })
@@ -276,18 +281,97 @@ describe('AudiobookReaderView', () => {
     serve(bookDetail())
     const view = await mountView()
 
-    const chapterBar = view.get('[role="progressbar"]')
+    const chapterBar = view.get('input[type="range"][aria-label="Launch"]')
     expect(chapterBar.attributes('aria-label')).toBe('Launch')
-    expect(chapterBar.attributes('aria-valuenow')).toBe('0')
+    expect((chapterBar.element as HTMLInputElement).value).toBe('0')
     expect(chapterBar.attributes('aria-valuetext')).toBe('reader.audiobook.timeLeft')
     expect(view.find('.scrubber-rail').exists()).toBe(true)
+  })
+
+  it('previews a chapter seek and commits its absolute position on release', async () => {
+    const manifest = audiobookManifest()
+    manifest.chapters[0]!.startMs = 600_000
+    manifest.chapters[0]!.endMs = 1_200_000
+    manifest.chapters.unshift({ ...manifest.chapters[0]!, id: 'opening', title: 'Opening', startMs: 0, endMs: 600_000 })
+    serve(bookDetail(), manifest)
+    const view = await mountView()
+    const bookBar = view.get('.scrubber-rail')
+    vi.spyOn(bookBar.element, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 100 } as DOMRect)
+    Object.assign(bookBar.element, { setPointerCapture: vi.fn<(pointerId: number) => void>() })
+    bookBar.element.dispatchEvent(new MouseEvent('pointerdown', { clientX: 20 }))
+    bookBar.element.dispatchEvent(new MouseEvent('pointerup', { clientX: 20 }))
+    await flushPromises()
+    mocks.seek.mockClear()
+
+    const chapterBar = view.get('input[type="range"][aria-label="Launch"]')
+    ;(chapterBar.element as HTMLInputElement).value = '50'
+    await chapterBar.trigger('input')
+    expect(mocks.seek).not.toHaveBeenCalled()
+    await chapterBar.trigger('change')
+
+    expect(mocks.seek).toHaveBeenCalledExactlyOnceWith(900)
+  })
+
+  it('seeks across audio files using the chapter position', async () => {
+    const manifest = audiobookManifest()
+    manifest.assets[0]!.durationMs = 1_800_000
+    manifest.assets.push({ ...manifest.assets[0]!, assetId: 'asset-2', fileId: 72, sequence: 1 })
+    serve(bookDetail(), manifest)
+    const view = await mountView()
+    mocks.activateIndex.mockClear()
+
+    await view.get('input[type="range"][aria-label="Launch"]').setValue('75')
+
+    expect(mocks.activateIndex).toHaveBeenCalledExactlyOnceWith(1, 900)
+  })
+
+  it('centers the current chapter whenever the chapter list opens', async () => {
+    const manifest = audiobookManifest()
+    const chapter = manifest.chapters[0]!
+    manifest.chapters = Array.from({ length: 60 }, (_, index) => ({
+      ...chapter,
+      id: `chapter-${index + 1}`,
+      title: `Chapter ${index + 1}`,
+      sequence: index,
+      startMs: index * 60_000,
+      endMs: (index + 1) * 60_000,
+    }))
+    mocks.resumePosition = 1_815
+    serve(bookDetail(), manifest)
+    const view = await mountView()
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('aria-current') === 'true') return { top: 900, height: 64 } as DOMRect
+      return { top: 100, height: 400 } as DOMRect
+    })
+    const chapterButtons = () => view.findAll('button').filter((button) => button.text() === 'reader.audiobook.chapters')
+    await chapterButtons()[0]!.trigger('click')
+
+    const activeChapter = view.get('[aria-current="true"]')
+    expect(activeChapter.text()).toContain('Chapter 31')
+    const list = activeChapter.element.parentElement!.parentElement!
+    expect(list.scrollTop).toBe(632)
+
+    list.scrollTop = 10
+    await flushPromises()
+    expect(list.scrollTop).toBe(10)
+
+    await view
+      .findAll('button')
+      .find((button) => button.text() === 'reader.audiobook.bookmarks')!
+      .trigger('click')
+    await chapterButtons()[1]!.trigger('click')
+    expect(view.get('[aria-current="true"]').element.parentElement!.parentElement!.scrollTop).toBe(632)
+
+    await chapterButtons()[0]!.trigger('click')
+    await chapterButtons()[0]!.trigger('click')
+    expect(view.get('[aria-current="true"]').element.parentElement!.parentElement!.scrollTop).toBe(632)
   })
 
   it('keeps the book scrubber available when chapter data is missing', async () => {
     serve(bookDetail(), { ...audiobookManifest(), chapters: [] })
     const view = await mountView()
 
-    expect(view.find('[role="progressbar"]').exists()).toBe(false)
+    expect(view.find('input[type="range"][aria-label="Launch"]').exists()).toBe(false)
     expect(view.find('.scrubber-rail').exists()).toBe(true)
   })
 
