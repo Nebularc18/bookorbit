@@ -18,6 +18,7 @@ import { useLibraries } from '@/features/library/composables/useLibraries'
 import { useLibraryPermissions } from '@/features/library/composables/useLibraryPermissions'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useSafeHtml } from '@/features/book/composables/useSafeHtml'
+import LinkedEditionReadSettings from '@/features/works/components/LinkedEditionReadSettings.vue'
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue'
 import { api } from '@/lib/api'
 import EntityNotFound from '@/components/EntityNotFound.vue'
@@ -632,6 +633,8 @@ defineOptions({ name: 'SeriesDetailView' })
         <div v-if="loadingBooks && !seriesInfo" class="mb-4 rounded-lg border border-border/70 bg-card/60 p-4 text-sm text-muted-foreground">
           {{ t('series.detail.loadingSeries') }}
         </div>
+
+        <LinkedEditionReadSettings v-if="seriesInfo" :library-id="libraryId ?? undefined" :libraries="libraries" class="mb-4" />
 
         <!-- Books section -->
         <section v-if="seriesInfo" class="rounded-lg border border-border/70 bg-card/60 p-3">

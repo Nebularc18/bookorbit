@@ -6,6 +6,7 @@ import { toast } from 'vue-sonner'
 import { api } from '@/lib/api'
 import { useAuth } from '@/features/auth/composables/useAuth'
 import { usePermissions } from '@/features/auth/composables/usePermissions'
+import LinkedEditionReadSettings from '@/features/works/components/LinkedEditionReadSettings.vue'
 import SettingsPageHeader from './SettingsPageHeader.vue'
 
 const props = withDefaults(
@@ -115,5 +116,6 @@ async function setStorageMode(sync: boolean) {
         </div>
       </div>
     </div>
+    <LinkedEditionReadSettings class="mt-6" />
   </div>
 </template>

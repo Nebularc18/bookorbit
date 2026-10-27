@@ -39,7 +39,7 @@ export class WorkService {
       contentFilters: user.isSuperuser ? undefined : user.contentFilters,
     });
     const editions = await this.repository.findUnreadEditions(edition.workId, bookId, user.id, visible);
-    return { bookIds: editions.map((row) => row.bookId) };
+    return { bookIds: editions.map((row) => row.bookId), ...(user.settings?.syncLinkedEditionsRead === true ? { automaticReadSync: true } : {}) };
   }
 
   async group(dto: GroupWorkDto, user: RequestUser) {

@@ -235,6 +235,14 @@ export class UserService {
     ) {
       throw new ForbiddenException('Demo-restricted account cannot change dashboard shelf sync settings');
     }
+    if (Object.hasOwn(dto.settings, 'syncLinkedEditionsRead')) {
+      if (requestingUser.permissions.includes(Permission.DemoRestricted)) {
+        throw new ForbiddenException('Demo-restricted account cannot change linked edition read settings');
+      }
+      if (typeof dto.settings.syncLinkedEditionsRead !== 'boolean') {
+        throw new BadRequestException('syncLinkedEditionsRead must be a boolean');
+      }
+    }
     const userId = requestingUser.id;
     // Settings are merged server-side, so the stored row is the only place the outgoing
     // timezone still exists. Read only when this write is the one that can replace it.
