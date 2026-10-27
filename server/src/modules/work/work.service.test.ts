@@ -60,6 +60,14 @@ describe('WorkService repository boundary', () => {
     expect(query.buildWhere).toHaveBeenCalledWith(null, { accessibleLibraryIds: [3], userId: 7, contentFilters: user.contentFilters });
     expect(repository.findUnreadEditions).toHaveBeenCalledWith(9, 1, 7, undefined);
   });
+  it('tells the client to skip the manual offer when automatic completion sync is enabled', async () => {
+    repository.findEditionWork.mockResolvedValue({ workId: 9, libraryId: 3 });
+    repository.findUnreadEditions.mockResolvedValue([{ bookId: 2 }]);
+    await expect(service.linkedUnreadEditions(1, { ...user, settings: { syncLinkedEditionsRead: true } })).resolves.toEqual({
+      bookIds: [2],
+      automaticReadSync: true,
+    });
+  });
   it('does not infer links for editions without a saved group', async () => {
     repository.findEditionWork.mockResolvedValue({ workId: null, libraryId: 3 });
     await expect(service.linkedUnreadEditions(1, user)).resolves.toEqual({ bookIds: [] });

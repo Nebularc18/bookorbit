@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import LinkedEditionReadSettings from './components/LinkedEditionReadSettings.vue'
 import { useWorkCatalog } from './composables/useWorkCatalog'
 const { t } = useI18n()
 const {
@@ -38,6 +39,7 @@ onMounted(load)
     <RouterLink :to="`/library/${libraryId}`" class="text-sm underline">{{ t('works.backToLibrary') }}</RouterLink>
     <h1 class="text-2xl font-semibold">{{ t('works.title') }}</h1>
     <p class="text-muted-foreground">{{ t('works.description') }}</p>
+    <LinkedEditionReadSettings />
     <label class="flex items-center gap-2">
       <input v-model="autoGroup" type="checkbox" :disabled="busy" @change="filter" />
       {{ t('works.automaticGrouping') }}

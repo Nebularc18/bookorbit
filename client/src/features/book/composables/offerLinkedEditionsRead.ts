@@ -6,8 +6,12 @@ import { apiJson, apiSend, jsonBody } from '@/lib/api-json'
 
 export async function offerLinkedEditionsRead(bookId: number): Promise<void> {
   try {
-    const { bookIds } = await apiJson<LinkedUnreadEditions>(`/api/v1/works/editions/${bookId}/linked-unread`, undefined, 'common.error')
-    if (!bookIds.length) return
+    const { bookIds, automaticReadSync } = await apiJson<LinkedUnreadEditions>(
+      `/api/v1/works/editions/${bookId}/linked-unread`,
+      undefined,
+      'common.error',
+    )
+    if (automaticReadSync || !bookIds.length) return
     const { t } = i18n.global
     let submitted = false
     toast(t('works.offerRead', { count: bookIds.length }), {

@@ -35,6 +35,7 @@ export type ProvisioningMethod = (typeof ProvisioningMethod)[keyof typeof Provis
 export interface UserSettings {
   metadataReminderPreferences?: import("./metadata-reminders").MetadataReminderPreferences;
   showBookRequests?: boolean;
+  syncLinkedEditionsRead?: boolean;
   syncReaderPreferences?: boolean;
   syncThemePreferences?: boolean;
   statisticsConfig?: import("./statistics").StatisticsSettings;

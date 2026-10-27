@@ -43,8 +43,10 @@ vi.mock('vue-router', async (importOriginal) => {
   }
 })
 
+vi.mock('@/features/auth/composables/useAuth', () => ({ useAuth: () => ({ user: ref(null) }) }))
+
 vi.mock('@/features/auth/composables/usePermissions', () => ({
-  usePermissions: () => ({ hasPermission: () => true }),
+  usePermissions: () => ({ hasPermission: () => true, isDemoRestrictedAccount: ref(false) }),
 }))
 
 vi.mock('@/features/library/composables/useLibraryPermissions', () => ({

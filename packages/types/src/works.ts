@@ -21,4 +21,5 @@ export interface WorkCatalogPage {
 
 export interface LinkedUnreadEditions {
   bookIds: number[];
+  automaticReadSync?: boolean;
 }

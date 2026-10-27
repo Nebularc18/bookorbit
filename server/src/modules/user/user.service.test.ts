@@ -303,6 +303,18 @@ describe('UserService', () => {
     expect(userRepo.update).toHaveBeenCalledWith(user.id, { settings });
   });
 
+  it('validates the linked edition toggle before persisting settings', async () => {
+    await expect(service.updateMySettings(reqUser(), { settings: { syncLinkedEditionsRead: 'true' } })).rejects.toBeInstanceOf(BadRequestException);
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('prevents demo accounts from changing linked edition completion settings', async () => {
+    await expect(
+      service.updateMySettings(reqUser({ permissions: [Permission.DemoRestricted] }), { settings: { syncLinkedEditionsRead: true } }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(userRepo.update).not.toHaveBeenCalled();
+  });
+
   it('updateMySettings throws NotFoundException when user does not exist', async () => {
     userRepo.update.mockResolvedValue(null);
 

@@ -19,6 +19,11 @@ describe('linked edition read offer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
+  it('does not offer manual propagation when automatic completion sync is enabled', async () => {
+    vi.mocked(apiJson).mockResolvedValue({ bookIds: [2], automaticReadSync: true })
+    await offerLinkedEditionsRead(1)
+    expect(toast).not.toHaveBeenCalled()
+  })
   it('waits for acceptance before changing other editions and submits only once', async () => {
     vi.mocked(apiJson).mockResolvedValue({ bookIds: [2, 3] })
     vi.mocked(apiSend).mockResolvedValue(undefined)
