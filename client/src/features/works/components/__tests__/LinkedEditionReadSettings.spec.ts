@@ -12,7 +12,7 @@ vi.mock('@/lib/api-json', async (original) => ({
   ...(await original<typeof import('@/lib/api-json')>()),
   apiSend: vi.fn<typeof apiSend>(),
 }))
-vi.mock('vue-sonner', () => ({ toast: { error: vi.fn() } }))
+vi.mock('vue-sonner', () => ({ toast: { error: vi.fn<(...args: unknown[]) => void>() } }))
 
 function render() {
   return mount(LinkedEditionReadSettings, {
