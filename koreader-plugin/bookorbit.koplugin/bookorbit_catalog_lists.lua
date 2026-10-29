@@ -1196,10 +1196,6 @@ function CatalogLists:listBody(kind, context)
     if kind == "search" then
         local m = { results = context.results, query = context.query, scope = context.scope or "all", screen_w = sw, screen_h = sh,
             action = function(b) return { kind = "open-book", book = b } end }
-        for _i, a in ipairs(context.results.authors or {}) do
-            local pb = self:listPhotoBook(a)
-            a.photo_path = pb and self:thumbnailDisplay(pb) or nil
-        end
         return function(f) return ListPages.searchBody(m, f) end, nil
     end
     if kind == "seriespage" then
@@ -1225,6 +1221,8 @@ function CatalogLists:listBody(kind, context)
         local m = {
             entries = books, view = self:listView(kind), screen_w = sw, screen_h = sh, local_page = context.local_page,
             offline = context.list_offline and {} or nil,
+            select = self:isBulkSelectionActive(),
+            selected = function(b) return self.bulk_select_all or self:bulkIsBookSelected(b) end,
             order_label = (context.params or {}).sort == "title" and _("Title A–Z") or _("Reading order"),
             states = states, indexes = indexes, current_index = cur, next_book = next_book,
             range = #books > 0 and T(_("Books %1 – %2"), first, last) or nil,

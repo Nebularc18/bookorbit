@@ -37,6 +37,7 @@ export * from './koreader';
 export * from './achievements';
 export * from './hardcover';
 export * from './readwise';
+export * from './read-aloud';
 export * from './storygraph';
 export * from './shared-reading-insights';
 export * from './user-preferences';
@@ -44,6 +45,7 @@ export * from './tts';
 export * from './upload-sessions';
 export * from './podcasts';
 export * from './metadata-cache';
+export * from './metadata-http-providers';
 export * from './delivery';
 export * from './server-identity';
 
