@@ -1,7 +1,9 @@
 ARG NODE_IMAGE=node:26.12.1-alpine3.23@sha256:bc2b334006f15c7167bbeb2f08f28c2df883f7594a0470e04454ebe7560cfe68
 
 FROM ${NODE_IMAGE} AS base
-RUN npm install -g pnpm@11.22.0
+COPY package.json /tmp/bookorbit-package.json
+RUN npm install -g "$(node -p 'require("/tmp/bookorbit-package.json").packageManager')" && \
+    rm /tmp/bookorbit-package.json
 
 # Stage 1: Build client
 FROM base AS client-builder
