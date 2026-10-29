@@ -406,7 +406,7 @@ jobs:
     name: Type Check (${{ matrix.package_label }})
     runs-on: ubuntu-latest
     needs: [dependency-review, detect-changes]
-    timeout-minutes: 10
+    timeout-minutes: 15
     if: >
       always() &&
       (needs.dependency-review.result == 'success' || needs.dependency-review.result == 'skipped') &&

@@ -46,13 +46,13 @@ for (const { path } of references) {
   const tests = config.fileNames.filter((file) => !file.endsWith(".d.ts")).sort();
   const directory = join(client, "node_modules/.tmp/typecheck-tests");
   mkdirSync(directory, { recursive: true });
-  for (let start = 0; start < tests.length; start += 64) {
-    const batch = start / 64;
+  for (let start = 0; start < tests.length; start += 16) {
+    const batch = start / 16;
     const batchPath = join(directory, `${batch}.json`);
     // Preserve ambient declarations in every batch; imported application code is resolved normally.
     const contents = JSON.stringify({
       extends: configPath,
-      files: [...ambient, ...tests.slice(start, start + 64)],
+      files: [...ambient, ...tests.slice(start, start + 16)],
       include: [],
       compilerOptions: { tsBuildInfoFile: join(directory, `${batch}.tsbuildinfo`) },
     });
