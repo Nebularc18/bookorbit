@@ -222,3 +222,156 @@ jobs:
             "${FULL_IMAGE}@${ARM64_DIGEST}"
           docker buildx imagetools inspect "${FULL_IMAGE}:${VERSION}"
           echo "Published ${FULL_IMAGE}:${VERSION} from ${TAG}" >> "$GITHUB_STEP_SUMMARY"
+
+  build-worker-amd64:
+    name: Build and Push Worker amd64
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ needs.prepare.outputs.image_name }}-read-aloud-worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_TOKEN || github.token }}
+
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./workers/read-aloud/Dockerfile
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          platforms: linux/amd64
+          build-args: APP_VERSION=${{ needs.prepare.outputs.release_tag }}
+          cache-from: type=gha,scope=worker-image-amd64
+          cache-to: type=gha,mode=max,scope=worker-image-amd64
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: table
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  build-worker-arm64:
+    name: Build and Push Worker arm64
+    needs: [prepare]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ needs.prepare.outputs.image_name }}-read-aloud-worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_TOKEN || github.token }}
+
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./workers/read-aloud/Dockerfile
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          platforms: linux/arm64
+          build-args: APP_VERSION=${{ needs.prepare.outputs.release_tag }}
+          cache-from: type=gha,scope=worker-image-arm64
+          cache-to: type=gha,mode=max,scope=worker-image-arm64
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/arm64
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: table
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  worker-merge-manifest:
+    name: Publish Multi-Arch Worker Image
+    concurrency:
+      group: release-worker-image-publication
+      cancel-in-progress: false
+    needs: [prepare, build-worker-amd64, build-worker-arm64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE_NAME: ${{ needs.prepare.outputs.image_name }}-read-aloud-worker
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003 # v4.4.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_TOKEN || github.token }}
+
+      - name: Publish release tags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.release_tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          AMD64_DIGEST: ${{ needs.build-worker-amd64.outputs.digest }}
+          ARM64_DIGEST: ${{ needs.build-worker-arm64.outputs.digest }}
+        run: |
+          set -euo pipefail
+          FULL_IMAGE="${REGISTRY}/${IMAGE_NAME}"
+          TAGS=(--tag "${FULL_IMAGE}:${VERSION}")
+          LATEST_TAG=$(gh api "repos/${GH_REPO}/releases/latest" --jq '.tag_name')
+          if [[ "$LATEST_TAG" == "$TAG" ]]; then
+            TAGS+=(--tag "${FULL_IMAGE}:latest")
+          fi
+          docker buildx imagetools create "${TAGS[@]}" \
+            "${FULL_IMAGE}@${AMD64_DIGEST}" \
+            "${FULL_IMAGE}@${ARM64_DIGEST}"
+          docker buildx imagetools inspect "${FULL_IMAGE}:${VERSION}"
+          echo "Published ${FULL_IMAGE}:${VERSION} from ${TAG}" >> "$GITHUB_STEP_SUMMARY"

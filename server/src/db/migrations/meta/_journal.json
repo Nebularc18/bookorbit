@@ -869,6 +869,55 @@
       "when": 1792779036059,
       "tag": "0123_shelfmark-requests",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1792779036060,
+      "tag": "0124_add_read_aloud_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1792779036061,
+      "tag": "0125_add_read_aloud_job_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1792779036062,
+      "tag": "0126_add_audiobook_chapter_editor",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1792779036063,
+      "tag": "0127_add_reading_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1792779036064,
+      "tag": "0128_add_external_metadata_providers",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1792779036065,
+      "tag": "0129_add_metadata_provider_icons",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1792810767351,
+      "tag": "0130_restore_metadata_editor_access",
+      "breakpoints": true
     }
   ]
 }
