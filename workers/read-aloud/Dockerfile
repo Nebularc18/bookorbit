@@ -4,7 +4,9 @@ ARG NODE_IMAGE=node:26.12.1-trixie-slim
 
 FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
-RUN npm install -g pnpm@11.22.0
+COPY package.json /tmp/bookorbit-package.json
+RUN npm install -g "$(node -p 'require("/tmp/bookorbit-package.json").packageManager')" && \
+    rm /tmp/bookorbit-package.json
 
 # The image runs on CPU only: without this, onnxruntime-node downloads its CUDA provider on
 # linux/x64, which cannot load here (no CUDA or cuDNN libraries) and only adds size.
@@ -43,6 +45,7 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates ffmpeg tini && \
     rm -rf /var/lib/apt/lists/* && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx && \
     mkdir -p /data/read-aloud/jobs /data/read-aloud/tmp /data/read-aloud/ghost-story && \
     chown -R node:node /data
 

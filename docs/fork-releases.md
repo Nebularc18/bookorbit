@@ -14,7 +14,8 @@ Only tags matching `nebularc-v${version}` count toward the fork's release histor
 
 To release:
 
-1. Merge the changes to `main` and wait for CI to succeed.
+1. Merge the changes to `main` and wait for CI to succeed, including the app and
+   worker container builds and Trivy scans for amd64 and arm64.
 2. Run the Release workflow manually against `main`.
 3. Review the draft GitHub release and write its Highlights section, following
    [the authoring guide](whats-new-authoring-guide.md). Include the upstream base
@@ -27,9 +28,16 @@ To release:
 
 The Release workflow creates a Git tag and draft release without building an image.
 You can also create and publish a stable `nebularc-vX.Y.Z` release directly in GitHub
-for a commit on `main` with successful CI. Only publishing a release starts an
-automatic container build. Pushes to `main`, pull requests, and draft releases do
-not build containers. To retry an existing published release, run Container Image
+for a commit on `main` with successful CI. CI builds both containers on native
+amd64 and arm64 runners for image-related changes, and on every manual or nightly
+run. These builds load images locally for Trivy and do not publish to GHCR. The
+CI Gate fails if a build or scan fails. Scan reports remain available as artifacts
+even when vulnerabilities fail the scan.
+
+Publishing a release starts Container Image, which rebuilds the tagged source,
+pushes images by digest, and repeats the scans before publishing release tags.
+This keeps release publication gated by current vulnerability data.
+To retry an existing published release, run Container Image
 manually with its `release_tag`. This builds the tagged commit, not the current
 branch. A release must include the workflow and dependency fixes to use them;
 create a new version rather than moving an existing published tag.
