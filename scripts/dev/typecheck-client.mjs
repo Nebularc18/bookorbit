@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const client = resolve(dirname(fileURLToPath(import.meta.url)), "../../client");
 const require = createRequire(join(client, "package.json"));
 const ts = require("typescript");
+const batchSize = process.env.BOOKORBIT_HEAVY_CHECK_ACTIVE === "1" ? 16 : 64;
 const { references } = JSON.parse(readFileSync(join(client, "tsconfig.json"), "utf8"));
 function check(path) {
   console.log(`Type checking client project ${path}`);
@@ -46,13 +47,13 @@ for (const { path } of references) {
   const tests = config.fileNames.filter((file) => !file.endsWith(".d.ts")).sort();
   const directory = join(client, "node_modules/.tmp/typecheck-tests");
   mkdirSync(directory, { recursive: true });
-  for (let start = 0; start < tests.length; start += 16) {
-    const batch = start / 16;
+  for (let start = 0; start < tests.length; start += batchSize) {
+    const batch = start / batchSize;
     const batchPath = join(directory, `${batch}.json`);
     // Preserve ambient declarations in every batch; imported application code is resolved normally.
     const contents = JSON.stringify({
       extends: configPath,
-      files: [...ambient, ...tests.slice(start, start + 16)],
+      files: [...ambient, ...tests.slice(start, start + batchSize)],
       include: [],
       compilerOptions: { tsBuildInfoFile: join(directory, `${batch}.tsbuildinfo`) },
     });
