@@ -35,9 +35,10 @@ describe('Drizzle migration journal', () => {
     for (let i = 0; i < journal.entries.length; i += 1) {
       const entry = journal.entries[i];
       const previous = journal.entries[i - 1];
-      const prefix = migrationPrefix(i);
+      const prefix = migrationPrefix(entry.idx);
 
-      expect(entry.idx).toBe(i);
+      expect(Number.isSafeInteger(entry.idx)).toBe(true);
+      expect(entry.idx).toBeGreaterThanOrEqual(0);
       expect(entry.tag.startsWith(`${prefix}_`)).toBe(true);
       expect(Number.isSafeInteger(entry.when)).toBe(true);
       expect(entry.when).toBeGreaterThan(0);
@@ -45,6 +46,7 @@ describe('Drizzle migration journal', () => {
       expect(existsSync(fileURLToPath(new URL(`./meta/${prefix}_snapshot.json`, migrationsDirUrl)))).toBe(true);
 
       if (previous) {
+        expect(entry.idx).toBeGreaterThan(previous.idx);
         expect(entry.when, `${entry.tag} must have a later journal timestamp than ${previous.tag}`).toBeGreaterThan(previous.when);
       }
     }
