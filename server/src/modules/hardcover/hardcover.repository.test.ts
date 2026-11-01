@@ -81,6 +81,38 @@ function makeRepository() {
 describe('HardcoverRepository', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it('pages progress sessions within the owning user, book, attempt and format', async () => {
+    const { repo, db } = makeRepository();
+    const limit = vi.fn().mockResolvedValue([]);
+    const orderBy = vi.fn().mockReturnValue({ limit });
+    const where = vi.fn().mockReturnValue({ orderBy });
+    db.select.mockReturnValue({ from: vi.fn().mockReturnValue({ where }) } as never);
+    const cursor = { startedAt: new Date('2024-01-03T12:00:00Z'), id: 123 };
+
+    await repo.findProgressSessions(7, 42, { attemptId: 9, startedOn: '2024-01-01', audio: true, cursor });
+
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0]);
+    expect(query.sql).toContain('"reading_sessions"."user_id" =');
+    expect(query.sql).toContain('"reading_sessions"."book_id" =');
+    expect(query.sql).toContain('"reading_sessions"."attempt_id" =');
+    expect(query.params).toEqual([7, 42, 9, 'listen', cursor.startedAt.toISOString(), cursor.startedAt.toISOString(), 123]);
+    expect(orderBy).toHaveBeenCalledWith(expect.anything(), expect.anything());
+    expect(limit).toHaveBeenCalledWith(100);
+  });
+
+  it('limits unassigned sessions to the current read dates and reading formats', async () => {
+    const { repo, db } = makeRepository();
+    const limit = vi.fn().mockResolvedValue([]);
+    const where = vi.fn().mockReturnValue({ orderBy: vi.fn().mockReturnValue({ limit }) });
+    db.select.mockReturnValue({ from: vi.fn().mockReturnValue({ where }) } as never);
+
+    await repo.findProgressSessions(7, 42, { attemptId: null, startedOn: '2024-01-01', audio: false });
+
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0]);
+    expect(query.sql).toContain('"reading_sessions"."attempt_id" is null');
+    expect(query.params).toEqual([7, 42, '2024-01-01T00:00:00.000Z', 'read', 'tts']);
+  });
+
   it('findSettings returns the user settings row', async () => {
     const { repo, settingsQuery, settingsRow } = makeRepository();
 

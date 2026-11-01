@@ -525,29 +525,37 @@ export class HardcoverSyncService {
     const hardcoverRating = book.rating ?? null;
 
     try {
+      const startDate = toDateString(book.startedAt);
+      const endDate = toDateString(book.finishedAt);
+      const localAttempts = typeof this.repo.findReadingAttempts === 'function' ? await this.repo.findReadingAttempts(userId, book.bookId) : [];
+      const primaryAttempt = selectPrimaryAttempt(localAttempts);
+      const syncsAudioProgress = book.format != null && isAudioFormat(book.format);
+      const sessionInput = { attemptId: primaryAttempt?.id ?? null, startedOn: startDate, audio: syncsAudioProgress };
+      const sessions = book.progress != null ? await this.repo.findProgressSessions(userId, book.bookId, sessionInput) : [];
+      const hasSessionProgress = sessions.length > 0 && book.progress != null;
+      // Marking a book read can fill its remote progress before the dated updates arrive.
+      const deferCompletion = hasSessionProgress && hardcoverStatusId === HARDCOVER_STATUS.READ;
       const userBookId = await this.insertOrFindUserBook(userId, token, {
         bookId: match.hardcoverBookId,
-        statusId: hardcoverStatusId,
+        statusId: deferCompletion ? HARDCOVER_STATUS.WANT_TO_READ : hardcoverStatusId,
         privacySettingId: settings.privacySettingId,
         editionId: match.hardcoverEditionId ?? undefined,
       });
 
-      await this.updateUserBookFields(userId, token, userBookId, {
-        statusId: hardcoverStatusId,
-        privacySettingId: settings.privacySettingId,
-        rating: hardcoverRating,
-        editionId: match.hardcoverEditionId ?? undefined,
-      });
+      if (!deferCompletion) {
+        await this.updateUserBookFields(userId, token, userBookId, {
+          statusId: hardcoverStatusId,
+          privacySettingId: settings.privacySettingId,
+          rating: hardcoverRating,
+          editionId: match.hardcoverEditionId ?? undefined,
+        });
+      }
 
       const state = await this.repo.findBookState(userId, book.bookId);
       const syncState = activeInitialState ?? state;
-      const startDate = toDateString(book.startedAt);
-      const endDate = toDateString(book.finishedAt);
       let hardcoverReadId: number | null = match.replacedHardcoverBookId != null ? null : (syncState?.hardcoverReadId ?? null);
       let progressSynced = true;
 
-      const localAttempts = typeof this.repo.findReadingAttempts === 'function' ? await this.repo.findReadingAttempts(userId, book.bookId) : [];
-      const primaryAttempt = selectPrimaryAttempt(localAttempts);
       // Every read id already owned on this book, tombstones included, so no attempt adopts one that
       // reading_attempts_external_uidx would refuse. Grows as this run claims further ids.
       const reserved = new Set<number>(
@@ -557,7 +565,6 @@ export class HardcoverSyncService {
         (attempt) => attempt.id !== primaryAttempt?.id && attempt.outcome !== 'skimmed' && attempt.outcome !== 'abandoned',
       );
       const syncsPrimaryRead = startDate !== null || endDate !== null || book.progress != null;
-      const syncsAudioProgress = book.format != null && isAudioFormat(book.format);
       if (syncsPrimaryRead && book.progress != null) {
         if (syncsAudioProgress && !match.editionAudioSeconds) throw new Error('missing_edition_audio_seconds');
         if (!syncsAudioProgress && !match.editionPages) throw new Error('missing_edition_pages');
@@ -582,17 +589,33 @@ export class HardcoverSyncService {
           reads,
           reserved,
           startedAt: startDate,
-          finishedAt: endDate,
-          progressPages,
-          progressSeconds,
+          finishedAt: deferCompletion ? null : endDate,
+          progressPages: hasSessionProgress ? undefined : progressPages,
+          progressSeconds: hasSessionProgress ? undefined : progressSeconds,
           editionId: match.hardcoverEditionId ?? undefined,
         });
+
+        let actionAt: string | undefined;
+        if (hasSessionProgress && hardcoverReadId != null) {
+          actionAt = await this.syncSessionProgress(userId, token, {
+            bookId: book.bookId,
+            readId: hardcoverReadId,
+            sessionInput,
+            sessions,
+            remoteProgress: syncsAudioProgress
+              ? (reads.find((read) => read.id === hardcoverReadId)?.progress_seconds ?? 0)
+              : (reads.find((read) => read.id === hardcoverReadId)?.progress_pages ?? 0),
+            total: (syncsAudioProgress ? match.editionAudioSeconds : match.editionPages)!,
+            progress: (syncsAudioProgress ? progressSeconds : progressPages)!,
+          });
+        }
 
         if ((progressPages != null || progressSeconds != null) && hardcoverReadId != null) {
           await this.updateAdditionalOpenReads(userId, token, {
             reads,
             primaryReadId: hardcoverReadId,
             reservedReadIds: reserved,
+            actionAt,
             startedAt: startDate,
             finishedAt: endDate,
             progressPages,
@@ -604,6 +627,18 @@ export class HardcoverSyncService {
             `[hardcover.sync_progress] [end] userId=${userId} bookId=${book.bookId} hardcoverBookId=${match.hardcoverBookId} hardcoverReadId=${hardcoverReadId} durationMs=${Date.now() - startedAt} progress=${book.progress} progressPages=${progressPages ?? null} progressSeconds=${progressSeconds ?? null} - progress sent to Hardcover`,
           );
         }
+      }
+
+      if (deferCompletion) {
+        if (hardcoverReadId != null && endDate) {
+          await this.updateUserBookRead(userId, token, hardcoverReadId, { finished_at: endDate });
+        }
+        await this.updateUserBookFields(userId, token, userBookId, {
+          statusId: hardcoverStatusId,
+          privacySettingId: settings.privacySettingId,
+          rating: hardcoverRating,
+          editionId: match.hardcoverEditionId ?? undefined,
+        });
       }
 
       for (const attempt of historyAttempts) {
@@ -657,6 +692,69 @@ export class HardcoverSyncService {
         syncError: error,
       });
       return 'failed';
+    }
+  }
+
+  private async syncSessionProgress(
+    userId: number,
+    token: string,
+    input: {
+      bookId: number;
+      readId: number;
+      sessionInput: { attemptId: number | null; startedOn: string | null; audio: boolean };
+      sessions: Awaited<ReturnType<HardcoverRepository['findProgressSessions']>>;
+      remoteProgress: number;
+      total: number;
+      progress: number;
+    },
+  ): Promise<string | undefined> {
+    const startedAt = Date.now();
+    let examined = 0;
+    let sent = 0;
+    this.logger.log(
+      `[hardcover.sync_progress_history] [start] userId=${userId} bookId=${input.bookId} hardcoverReadId=${input.readId} audio=${input.sessionInput.audio} - syncing dated progress`,
+    );
+    try {
+      const progressField = input.sessionInput.audio ? 'progress_seconds' : 'progress_pages';
+      let progress = input.remoteProgress;
+      let actionAt: string | undefined;
+      let sessions = input.sessions;
+      while (sessions.length > 0) {
+        for (const session of sessions) {
+          examined++;
+          const value = Math.round(((session.endProgress ?? 0) / 100) * input.total);
+          if (value === input.progress) actionAt = session.endedAt.toISOString();
+          if (value <= progress || value > input.progress) continue;
+          await this.updateUserBookRead(userId, token, input.readId, {
+            [progressField]: value,
+            action_at: session.endedAt.toISOString(),
+          });
+          sent++;
+          progress = value;
+        }
+        if (sessions.length < 100) break;
+        const last = sessions[sessions.length - 1]!;
+        sessions = await this.repo.findProgressSessions(userId, input.bookId, {
+          ...input.sessionInput,
+          cursor: { startedAt: last.startedAt, id: last.id },
+        });
+      }
+      if (progress !== input.progress) {
+        await this.updateUserBookRead(userId, token, input.readId, {
+          [progressField]: input.progress,
+          ...(actionAt ? { action_at: actionAt } : {}),
+        });
+        sent++;
+      }
+      this.logger.log(
+        `[hardcover.sync_progress_history] [end] userId=${userId} bookId=${input.bookId} hardcoverReadId=${input.readId} durationMs=${Date.now() - startedAt} examinedSessions=${examined} sentUpdates=${sent} - dated progress synced`,
+      );
+      return actionAt;
+    } catch (err) {
+      this.logger.error(
+        `[hardcover.sync_progress_history] [fail] userId=${userId} bookId=${input.bookId} hardcoverReadId=${input.readId} durationMs=${Date.now() - startedAt} errorClass=${err instanceof Error ? err.constructor.name : 'Error'} error="${sanitizeLogValue(err instanceof Error ? err.message : String(err))}" - dated progress sync failed`,
+      );
+      throw err;
     }
   }
 
@@ -877,6 +975,7 @@ export class HardcoverSyncService {
       reads: FindUserBookReadsResult['user_book_reads'];
       primaryReadId: number;
       reservedReadIds: ReadonlySet<number>;
+      actionAt?: string;
       startedAt?: string | null;
       finishedAt?: string | null;
       progressPages?: number;
@@ -893,6 +992,7 @@ export class HardcoverSyncService {
     await Promise.all(
       siblingReadIds.map((readId) =>
         this.updateUserBookRead(userId, token, readId, {
+          ...(input.actionAt ? { action_at: input.actionAt } : {}),
           ...(input.startedAt ? { started_at: input.startedAt } : {}),
           ...(input.finishedAt ? { finished_at: input.finishedAt } : {}),
           ...(input.progressPages != null ? { progress_pages: input.progressPages } : {}),

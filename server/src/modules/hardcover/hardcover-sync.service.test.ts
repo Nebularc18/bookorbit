@@ -21,6 +21,7 @@ const mockRepo = {
   findBookSyncData: vi.fn(),
   findCurrentReadingBooks: vi.fn(),
   findReadingAttempts: vi.fn(),
+  findProgressSessions: vi.fn(),
   findClaimedHardcoverReadIds: vi.fn(),
   linkReadingAttempt: vi.fn(),
   unlinkReadingAttempt: vi.fn(),
@@ -99,6 +100,7 @@ describe('HardcoverSyncService', () => {
     mockRepo.findBookSyncData.mockResolvedValue(null);
     mockRepo.findCurrentReadingBooks.mockResolvedValue([]);
     mockRepo.findReadingAttempts.mockResolvedValue([]);
+    mockRepo.findProgressSessions.mockResolvedValue([]);
     mockRepo.findClaimedHardcoverReadIds.mockResolvedValue([]);
     mockRepo.linkReadingAttempt.mockResolvedValue('linked');
     mockRepo.unlinkReadingAttempt.mockResolvedValue(true);
@@ -203,6 +205,138 @@ describe('HardcoverSyncService', () => {
       );
       expect(mockClient.query.mock.calls[3]?.[3]?.object).not.toHaveProperty('progress_pages');
       expect(mockRepo.upsertBookState).toHaveBeenCalledWith(expect.objectContaining({ lastSyncedProgress: 42, syncError: null }));
+    });
+
+    it.each([
+      { format: 'm4b', field: 'progress_seconds', total: 3600 },
+      { format: 'epub', field: 'progress_pages', total: 300 },
+    ])('backdates delayed $format progress to the original session days', async ({ format, field, total }) => {
+      const service = await makeTestingService();
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findBookSyncData.mockResolvedValue({ ...readingBook, format, progress: 80 });
+      mockRepo.findProgressSessions.mockResolvedValue(
+        [20, 50, 80].map((endProgress, index) => ({
+          id: index + 1,
+          startedAt: new Date(`2024-01-0${index + 2}T19:00:00Z`),
+          endedAt: new Date(`2024-01-0${index + 2}T20:00:00Z`),
+          endProgress,
+        })),
+      );
+      mockMatchService.matchBook.mockResolvedValue({
+        hardcoverBookId: 10,
+        hardcoverEditionId: 20,
+        editionPages: 300,
+        editionAudioSeconds: 3600,
+        matchMethod: 'cached',
+      });
+      mockClient.query
+        .mockResolvedValueOnce({ insert_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ user_book_reads: [] })
+        .mockResolvedValueOnce({ insert_user_book_read: { user_book_read: { id: 77 }, error: null } });
+      for (let i = 0; i < 3; i++) {
+        mockClient.query.mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } });
+      }
+
+      await expect(service.syncBook(1, 1)).resolves.toBe('synced');
+
+      const writes = mockClient.query.mock.calls.filter((call) => call[2].includes('mutation UpdateUserBookRead'));
+      expect(writes.map((call) => call[3])).toEqual(
+        [20, 50, 80].map((percent, index) => ({
+          id: 77,
+          object: { [field]: Math.round((total * percent) / 100), action_at: `2024-01-0${index + 2}T20:00:00.000Z` },
+        })),
+      );
+      expect(mockClient.query.mock.calls[3]?.[3]?.object).not.toHaveProperty(field);
+    });
+
+    it('resumes after a partially successful sync without replaying acknowledged progress', async () => {
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findBookSyncData.mockResolvedValue({ ...readingBook, progress: 80 });
+      mockRepo.findProgressSessions.mockResolvedValue(
+        [20, 50, 80].map((endProgress, index) => ({
+          id: index + 1,
+          startedAt: new Date(`2024-01-0${index + 2}`),
+          endedAt: new Date(`2024-01-0${index + 2}`),
+          endProgress,
+        })),
+      );
+      mockMatchService.matchBook.mockResolvedValue({ hardcoverBookId: 10, editionPages: 300, matchMethod: 'cached' });
+      mockClient.query
+        .mockResolvedValueOnce({ insert_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ user_book_reads: [{ id: 77, started_at: '2024-01-01', finished_at: null, progress_pages: 150 }] })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } });
+
+      await expect(makeService().syncBook(1, 1)).resolves.toBe('synced');
+
+      const progressWrites = mockClient.query.mock.calls.filter((call) => call[3]?.object?.progress_pages != null);
+      expect(progressWrites.map((call) => call[3].object)).toEqual([{ progress_pages: 240, action_at: '2024-01-04T00:00:00.000Z' }]);
+    });
+
+    it('sends dated progress before marking a delayed completed book as read', async () => {
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findBookSyncData.mockResolvedValue({ ...readingBook, status: 'read', progress: 100, finishedAt: new Date('2024-01-04') });
+      mockRepo.findProgressSessions.mockResolvedValue(
+        [50, 100].map((endProgress, index) => ({
+          id: index + 1,
+          startedAt: new Date(`2024-01-0${index + 3}`),
+          endedAt: new Date(`2024-01-0${index + 3}`),
+          endProgress,
+        })),
+      );
+      mockMatchService.matchBook.mockResolvedValue({ hardcoverBookId: 10, editionPages: 300, matchMethod: 'cached' });
+      mockClient.query
+        .mockResolvedValueOnce({ insert_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ user_book_reads: [] })
+        .mockResolvedValueOnce({ insert_user_book_read: { user_book_read: { id: 77 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book: { user_book: { id: 55 }, error: null } });
+
+      await expect(makeService().syncBook(1, 1)).resolves.toBe('synced');
+
+      expect(mockClient.query.mock.calls[0]?.[3]?.object.status_id).toBe(1);
+      expect(mockClient.query.mock.calls[4]?.[3]?.object).toEqual({ progress_pages: 300, action_at: '2024-01-04T00:00:00.000Z' });
+      expect(mockClient.query.mock.calls[5]?.[3]?.object).toEqual({ finished_at: '2024-01-04' });
+      expect(mockClient.query.mock.calls[6]?.[3]?.object.status_id).toBe(3);
+    });
+
+    it('continues through session batches and isolates a reread from earlier attempts', async () => {
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findBookSyncData.mockResolvedValue({ ...readingBook, progress: 80 });
+      mockRepo.findReadingAttempts.mockResolvedValue([
+        { id: 9, startedOn: '2024-01-01', endedOn: null, outcome: null, externalProvider: 'hardcover', externalId: '77' },
+      ]);
+      const firstBatch = Array.from({ length: 100 }, (_, index) => ({
+        id: index + 1,
+        startedAt: new Date('2024-01-02'),
+        endedAt: new Date('2024-01-02'),
+        endProgress: 20,
+      }));
+      mockRepo.findProgressSessions
+        .mockResolvedValueOnce(firstBatch)
+        .mockResolvedValueOnce([{ id: 101, startedAt: new Date('2024-01-04'), endedAt: new Date('2024-01-04'), endProgress: 80 }]);
+      mockMatchService.matchBook.mockResolvedValue({ hardcoverBookId: 10, editionPages: 300, matchMethod: 'cached' });
+      mockClient.query
+        .mockResolvedValueOnce({ insert_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ user_book_reads: [{ id: 77, started_at: '2024-01-01', finished_at: null, progress_pages: 60 }] })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } });
+
+      await expect(makeService().syncBook(1, 1)).resolves.toBe('synced');
+
+      expect(mockRepo.findProgressSessions).toHaveBeenNthCalledWith(2, 1, 1, {
+        attemptId: 9,
+        startedOn: '2024-01-01',
+        audio: false,
+        cursor: { startedAt: firstBatch[99]!.startedAt, id: 100 },
+      });
+      const progressWrites = mockClient.query.mock.calls.filter((call) => call[3]?.object?.progress_pages != null);
+      expect(progressWrites.map((call) => call[3])).toEqual([{ id: 77, object: { progress_pages: 240, action_at: '2024-01-04T00:00:00.000Z' } }]);
     });
 
     it('fails audiobook progress sync when the matched edition has no duration', async () => {
