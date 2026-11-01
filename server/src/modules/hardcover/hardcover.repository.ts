@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { isAudioFormat, Permission } from '@bookorbit/types';
 import type { ContentFilterRules, ReadStatus } from '@bookorbit/types';
-import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
@@ -336,6 +336,38 @@ export class HardcoverRepository {
       status: row.status as string,
       progress: row.format && isAudioFormat(row.format) ? audioProgress : readingProgress,
     }));
+  }
+
+  async findProgressSessions(
+    userId: number,
+    bookId: number,
+    input: {
+      attemptId: number | null;
+      startedOn: string | null;
+      audio: boolean;
+      cursor?: { startedAt: Date; id: number };
+    },
+  ) {
+    const sessions = schema.readingSessions;
+    const cursor = input.cursor;
+    return this.db
+      .select({ id: sessions.id, startedAt: sessions.startedAt, endedAt: sessions.endedAt, endProgress: sessions.endProgress })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.userId, userId),
+          eq(sessions.bookId, bookId),
+          input.attemptId != null ? eq(sessions.attemptId, input.attemptId) : isNull(sessions.attemptId),
+          input.attemptId == null && input.startedOn ? gte(sessions.startedAt, new Date(input.startedOn)) : undefined,
+          input.audio ? eq(sessions.sessionType, 'listen') : inArray(sessions.sessionType, ['read', 'tts']),
+          isNotNull(sessions.endProgress),
+          cursor
+            ? or(gt(sessions.startedAt, cursor.startedAt), and(eq(sessions.startedAt, cursor.startedAt), gt(sessions.id, cursor.id)))
+            : undefined,
+        ),
+      )
+      .orderBy(asc(sessions.startedAt), asc(sessions.id))
+      .limit(100);
   }
 
   async findReadingAttempts(userId: number, bookId: number) {
