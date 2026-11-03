@@ -323,7 +323,9 @@ describe('HardcoverSyncService', () => {
       mockMatchService.matchBook.mockResolvedValue({ hardcoverBookId: 10, editionPages: 300, matchMethod: 'cached' });
       mockClient.query
         .mockResolvedValueOnce({ insert_user_book: { user_book: { id: 55 }, error: null } })
-        .mockResolvedValueOnce({ user_book_reads: [] })
+        .mockResolvedValueOnce({
+          user_book_reads: [{ id: 899, started_at: '2023-01-01', finished_at: null, progress_pages: 0 }],
+        })
         .mockResolvedValueOnce({ insert_user_book_read: { user_book_read: { id: 77 }, error: null } })
         .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } })
         .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } })
@@ -336,6 +338,8 @@ describe('HardcoverSyncService', () => {
       expect(mockClient.query.mock.calls[4]?.[3]?.object).toEqual({ progress_pages: 300, action_at: '2024-01-04T00:00:00.000Z' });
       expect(mockClient.query.mock.calls[5]?.[3]?.object).toEqual({ finished_at: '2024-01-04' });
       expect(mockClient.query.mock.calls[6]?.[3]?.object.status_id).toBe(3);
+      const readWrites = mockClient.query.mock.calls.filter(([, , query]) => query.includes('mutation UpdateUserBookRead'));
+      expect(readWrites.map(([, , , variables]) => variables.id)).toEqual([77, 77, 77]);
     });
 
     it('continues through session batches and isolates a reread from earlier attempts', async () => {
@@ -605,11 +609,25 @@ describe('HardcoverSyncService', () => {
       expect(mockRepo.upsertBookState).toHaveBeenCalledWith(expect.objectContaining({ hardcoverReadId: 777 }));
     });
 
-    it('syncs progress to sibling unfinished reads to avoid page 0 in Hardcover UI', async () => {
-      const logSpy = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    it.each(['reading', 'read'] as const)('only updates the selected remote read when the book is %s', async (status) => {
       mockSettingsService.getTokenForUser.mockResolvedValue('tok');
-      mockRepo.findBookSyncData.mockResolvedValue(readingBook);
-      mockRepo.findBookState.mockResolvedValue({ hardcoverReadId: 900 });
+      mockRepo.findBookSyncData.mockResolvedValue({
+        ...readingBook,
+        status,
+        progress: status === 'read' ? 100 : 42,
+        finishedAt: status === 'read' ? new Date('2024-01-04') : null,
+      });
+      mockRepo.findReadingAttempts.mockResolvedValue([
+        {
+          id: 2,
+          startedOn: '2024-01-01',
+          endedOn: status === 'read' ? '2024-01-04' : null,
+          outcome: status === 'read' ? 'completed' : null,
+          externalProvider: 'hardcover',
+          externalId: '900',
+        },
+      ]);
+      mockRepo.findClaimedHardcoverReadIds.mockResolvedValue([900]);
       mockMatchService.matchBook.mockResolvedValue({ hardcoverBookId: 10, hardcoverEditionId: 20, editionPages: 300, matchMethod: 'cached' });
       mockClient.query
         .mockResolvedValueOnce({ insert_user_book: { user_book: { id: 55 }, error: null } })
@@ -618,23 +636,25 @@ describe('HardcoverSyncService', () => {
           user_book_reads: [
             { id: 900, started_at: '2024-01-01', finished_at: null, progress_pages: null },
             { id: 899, started_at: '2024-01-01', finished_at: null, progress_pages: null },
+            { id: 898, started_at: '2023-01-01', finished_at: null, progress_pages: null },
           ],
         })
-        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 900 }, error: null } })
-        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 899 }, error: null } });
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 900 }, error: null } });
 
-      await makeService().syncBook(1, 1);
+      await expect(makeService().syncBook(1, 1)).resolves.toBe('synced');
 
-      expect(mockClient.query).toHaveBeenNthCalledWith(
-        5,
-        1,
-        'tok',
-        expect.stringContaining('mutation UpdateUserBookRead'),
-        expect.objectContaining({ id: 899, object: expect.objectContaining({ progress_pages: 126 }) }),
-      );
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[hardcover.sync_progress] [end] userId=1 bookId=1'));
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('progress=42 progressPages=126 progressSeconds=null - progress sent to Hardcover'));
-      logSpy.mockRestore();
+      const readWrites = mockClient.query.mock.calls.filter(([, , query]) => query.includes('mutation UpdateUserBookRead'));
+      expect(readWrites.map(([, , , variables]) => variables)).toEqual([
+        {
+          id: 900,
+          object: {
+            started_at: '2024-01-01',
+            ...(status === 'read' ? { finished_at: '2024-01-04' } : {}),
+            progress_pages: status === 'read' ? 300 : 126,
+            edition_id: 20,
+          },
+        },
+      ]);
     });
 
     it('does not fan primary progress out to an open read reserved by another attempt', async () => {
@@ -1311,7 +1331,6 @@ describe('HardcoverSyncService', () => {
         { id: 777, started_at: '2024-01-01', finished_at: null, progress_pages: null },
       ]);
       updateRead(777);
-      updateRead(900);
 
       await makeService().syncBook(1, 1);
 
