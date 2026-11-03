@@ -32,6 +32,7 @@ import {
 } from './hardcover-read-selection';
 import { type BookSyncData, HardcoverRepository } from './hardcover.repository';
 import { HardcoverSettingsService } from './hardcover-settings.service';
+import { sessionProgressUpdates } from './hardcover-session-progress';
 import {
   normalizeHardcoverBookSyncOverride,
   resolveHardcoverBookSyncDecision,
@@ -719,18 +720,21 @@ export class HardcoverSyncService {
       let progress = input.remoteProgress;
       let actionAt: string | undefined;
       let sessions = input.sessions;
+      const timeZone = await this.repo.findUserTimeZone(userId);
       while (sessions.length > 0) {
         for (const session of sessions) {
           examined++;
-          const value = Math.round(((session.endProgress ?? 0) / 100) * input.total);
-          if (value === input.progress) actionAt = session.endedAt.toISOString();
-          if (value <= progress || value > input.progress) continue;
-          await this.updateUserBookRead(userId, token, input.readId, {
-            [progressField]: value,
-            action_at: session.endedAt.toISOString(),
-          });
-          sent++;
-          progress = value;
+          for (const update of sessionProgressUpdates(session, timeZone)) {
+            const value = Math.round((update.progress / 100) * input.total);
+            if (value === input.progress) actionAt = update.actionAt;
+            if (value <= progress || value > input.progress) continue;
+            await this.updateUserBookRead(userId, token, input.readId, {
+              [progressField]: value,
+              action_at: update.actionAt,
+            });
+            sent++;
+            progress = value;
+          }
         }
         if (sessions.length < 100) break;
         const last = sessions[sessions.length - 1]!;

@@ -22,6 +22,7 @@ const mockRepo = {
   findCurrentReadingBooks: vi.fn(),
   findReadingAttempts: vi.fn(),
   findProgressSessions: vi.fn(),
+  findUserTimeZone: vi.fn(),
   findClaimedHardcoverReadIds: vi.fn(),
   linkReadingAttempt: vi.fn(),
   unlinkReadingAttempt: vi.fn(),
@@ -101,6 +102,7 @@ describe('HardcoverSyncService', () => {
     mockRepo.findCurrentReadingBooks.mockResolvedValue([]);
     mockRepo.findReadingAttempts.mockResolvedValue([]);
     mockRepo.findProgressSessions.mockResolvedValue([]);
+    mockRepo.findUserTimeZone.mockResolvedValue('UTC');
     mockRepo.findClaimedHardcoverReadIds.mockResolvedValue([]);
     mockRepo.linkReadingAttempt.mockResolvedValue('linked');
     mockRepo.unlinkReadingAttempt.mockResolvedValue(true);
@@ -248,6 +250,38 @@ describe('HardcoverSyncService', () => {
         })),
       );
       expect(mockClient.query.mock.calls[3]?.[3]?.object).not.toHaveProperty(field);
+    });
+
+    it.each([
+      { timeZone: 'UTC', start: '2024-01-02T23:00:00Z', end: '2024-01-03T00:30:00Z', midnight: '2024-01-02T23:59:59.999Z', remote: 0 },
+      { timeZone: 'Europe/Stockholm', start: '2024-01-02T22:00:00Z', end: '2024-01-02T23:30:00Z', midnight: '2024-01-02T22:59:59.999Z', remote: 0 },
+      { timeZone: 'UTC', start: '2024-01-02T23:00:00Z', end: '2024-01-03T00:30:00Z', midnight: '2024-01-02T23:59:59.999Z', remote: 3600 },
+    ])('splits overnight listening at midnight in $timeZone with remote progress $remote', async ({ timeZone, start, end, midnight, remote }) => {
+      const service = await makeTestingService();
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findUserTimeZone.mockResolvedValue(timeZone);
+      mockRepo.findBookSyncData.mockResolvedValue({ ...readingBook, format: 'm4b', progress: 75 });
+      mockRepo.findProgressSessions.mockResolvedValue([
+        { id: 1, startedAt: new Date(start), endedAt: new Date(end), durationSeconds: 5400, progressDelta: 75, endProgress: 75 },
+      ]);
+      mockMatchService.matchBook.mockResolvedValue({ hardcoverBookId: 10, editionAudioSeconds: 7200, matchMethod: 'cached' });
+      mockClient.query
+        .mockResolvedValueOnce({ insert_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ user_book_reads: [{ id: 77, started_at: '2024-01-01', finished_at: null, progress_seconds: remote }] })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } });
+      if (remote < 3600) {
+        mockClient.query.mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } });
+      }
+
+      await expect(service.syncBook(1, 1)).resolves.toBe('synced');
+
+      const writes = mockClient.query.mock.calls.filter((call) => call[3]?.object?.progress_seconds != null);
+      expect(writes.map((call) => call[3].object)).toEqual([
+        ...(remote < 3600 ? [{ progress_seconds: 3600, action_at: midnight }] : []),
+        { progress_seconds: 5400, action_at: new Date(end).toISOString() },
+      ]);
     });
 
     it('resumes after a partially successful sync without replaying acknowledged progress', async () => {

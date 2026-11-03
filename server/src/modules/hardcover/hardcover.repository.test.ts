@@ -120,6 +120,21 @@ describe('HardcoverRepository', () => {
     expect(settingsQuery.findFirst).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { settings: { timezone: 'Europe/Stockholm' }, expected: 'Europe/Stockholm' },
+    { settings: { timezone: 'invalid' }, expected: 'UTC' },
+    { settings: {}, expected: 'UTC' },
+  ])('resolves the owning user timezone from $settings', async ({ settings, expected }) => {
+    const { repo, db, bookIdWhere, bookIdLimit } = makeRepository();
+    bookIdLimit.mockResolvedValue([{ settings }] as never);
+
+    await expect(repo.findUserTimeZone(7)).resolves.toBe(expected);
+
+    expect(db.select).toHaveBeenCalledWith({ settings: schema.users.settings });
+    expect(new PgDialect().sqlToQuery(bookIdWhere.mock.calls[0]![0]).params).toEqual([7]);
+    expect(bookIdLimit).toHaveBeenCalledWith(1);
+  });
+
   it('upsertSettings inserts or updates settings for a user', async () => {
     const { repo, db, settingsInsert, settingsRow } = makeRepository();
     db.insert.mockReset();
