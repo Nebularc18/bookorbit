@@ -5,6 +5,7 @@ import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, ne, or, sql } from '
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
+import { resolveTimeZone } from '../../common/utils/timezone.utils';
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
 import type { HardcoverBookState, HardcoverUserSetting, NewHardcoverBookState, NewHardcoverUserSetting } from '../../db/schema';
@@ -338,6 +339,11 @@ export class HardcoverRepository {
     }));
   }
 
+  async findUserTimeZone(userId: number): Promise<string> {
+    const [user] = await this.db.select({ settings: schema.users.settings }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+    return resolveTimeZone((user?.settings as { timezone?: unknown } | undefined)?.timezone);
+  }
+
   async findProgressSessions(
     userId: number,
     bookId: number,
@@ -351,7 +357,14 @@ export class HardcoverRepository {
     const sessions = schema.readingSessions;
     const cursor = input.cursor;
     return this.db
-      .select({ id: sessions.id, startedAt: sessions.startedAt, endedAt: sessions.endedAt, endProgress: sessions.endProgress })
+      .select({
+        id: sessions.id,
+        startedAt: sessions.startedAt,
+        endedAt: sessions.endedAt,
+        durationSeconds: sessions.durationSeconds,
+        progressDelta: sessions.progressDelta,
+        endProgress: sessions.endProgress,
+      })
       .from(sessions)
       .where(
         and(

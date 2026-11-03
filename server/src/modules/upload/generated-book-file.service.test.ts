@@ -1,6 +1,8 @@
 import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 import type { RequestUser } from '../../common/types/request-user';
 import {
@@ -20,10 +22,17 @@ vi.mock('node:stream/promises', async (importOriginal) => {
     ...actual,
     pipeline: vi.fn(async (...streams: Parameters<typeof actual.pipeline>) => {
       if (!copyMock.failAfterWriting) return actual.pipeline(...streams);
+      const readable = streams[0] as NodeJS.ReadableStream;
       const writable = streams.at(-1) as NodeJS.WritableStream;
-      await new Promise<void>((resolve) => writable.write('half a copy', () => resolve()));
-      writable.end();
-      throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
+      const failingCopy = new Transform({
+        transform(_chunk, _encoding, callback) {
+          callback(null, 'half a copy');
+        },
+        flush(callback) {
+          callback(Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }));
+        },
+      });
+      return actual.pipeline(readable, failingCopy, writable);
     }),
   };
 });
@@ -307,6 +316,8 @@ describe('GeneratedBookFileService', () => {
       await expect(
         service.addFile({ bookId: 12, sourcePath: source, partialKey: 'abc', maxBytes: 1e12, user: USER, filename: 'novel.readaloud.epub' }),
       ).rejects.toThrow('no space left on device');
+      expect(vi.mocked(pipeline).mock.lastCall?.[0]).toHaveProperty('closed', true);
+      expect(vi.mocked(pipeline).mock.lastCall?.at(-1)).toHaveProperty('closed', true);
       expect(await readdir(folder)).toEqual([]);
     });
 
