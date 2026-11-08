@@ -8,6 +8,8 @@ export * from './libraries';
 export * from './books';
 export * from './book-covers';
 export * from './book-duplicates';
+export * from './book-links';
+export * from './book-merges';
 export * from './book-move';
 export * from './collections';
 export * from './smart-scopes';
@@ -49,3 +51,4 @@ export * from './delivery';
 export * from './server-identity';
 
 export * from './works';
+export * from './story-edits';

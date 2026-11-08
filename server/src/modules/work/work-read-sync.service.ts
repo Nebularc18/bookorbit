@@ -52,7 +52,7 @@ export class WorkReadSyncService implements OnModuleInit, OnModuleDestroy {
       for (;;) {
         const { bookIds } = await this.works.linkedUnreadEditions(bookId, user);
         if (!bookIds.length) break;
-        await this.books.bulkSetStatus(bookIds, 'read', user);
+        await this.books.bulkSetStatus(bookIds, { status: 'read' }, user);
         updated += bookIds.length;
       }
       this.logger.log(

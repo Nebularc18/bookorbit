@@ -47,7 +47,7 @@ describe('linked edition completion sync', () => {
     finish();
     await settled();
     expect(works.linkedUnreadEditions).toHaveBeenCalledWith(1, reader);
-    expect(books.bulkSetStatus).toHaveBeenCalledWith([2, 3], 'read', reader);
+    expect(books.bulkSetStatus).toHaveBeenCalledWith([2, 3], { status: 'read' }, reader);
   });
 
   it.each([{}, { syncLinkedEditionsRead: false }, { syncLinkedEditionsRead: 'true' }])('requires explicit opt-in: %j', async (settings) => {
@@ -91,7 +91,7 @@ describe('linked edition completion sync', () => {
     finish(3);
     await settled();
     expect(Logger.prototype.warn).toHaveBeenCalledWith(expect.stringContaining('[work.sync_read] [fail]'));
-    expect(books.bulkSetStatus).toHaveBeenCalledWith([4], 'read', reader);
+    expect(books.bulkSetStatus).toHaveBeenCalledWith([4], { status: 'read' }, reader);
   });
 
   it('unsubscribes on shutdown', async () => {
