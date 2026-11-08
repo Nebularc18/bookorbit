@@ -43,7 +43,7 @@ RUN cd /deploy && \
 FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates ffmpeg tini && \
+    apt-get install -y --no-install-recommends apt ca-certificates ffmpeg libapt-pkg7.0 tini zlib1g && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx && \
     mkdir -p /data/read-aloud/jobs /data/read-aloud/tmp /data/read-aloud/ghost-story && \
