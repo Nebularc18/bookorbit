@@ -96,6 +96,56 @@ describe('useReadingSession - elapsedMinutes', () => {
     expect(elapsedMinutes.value).toBe(0)
   })
 
+  it('caps reading time and its end timestamp when idle timers are suspended for weeks', () => {
+    const start = new Date('2026-10-22T10:00:00.000Z')
+    vi.setSystemTime(start)
+    const { onActivity, endSession } = useReadingSession(1, () => ({ percentage: 10 }))
+    onActivity()
+
+    vi.setSystemTime(new Date('2026-11-08T15:45:00.000Z'))
+    endSession()
+
+    const body = JSON.parse((apiMock.mock.calls[0]![1] as { body: string }).body)
+    expect(body.durationSeconds).toBe(300)
+    expect(body.startedAt).toBe(start.toISOString())
+    expect(body.endedAt).toBe('2026-10-22T10:05:00.000Z')
+  })
+
+  it('starts a separate session when activity resumes before an overdue idle callback runs', async () => {
+    vi.setSystemTime(new Date('2026-10-22T10:00:00.000Z'))
+    const { onActivity, endSession } = useReadingSession(1, () => ({ percentage: 10 }))
+    onActivity()
+
+    vi.setSystemTime(new Date('2026-11-08T15:45:00.000Z'))
+    onActivity()
+    await vi.advanceTimersByTimeAsync(60_000)
+    endSession()
+
+    const bodies = apiMock.mock.calls.map((call) => JSON.parse((call[1] as { body: string }).body))
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0].durationSeconds).toBe(300)
+    expect(bodies[1].durationSeconds).toBe(60)
+    expect(bodies[1].startedAt).toBe('2026-11-08T15:45:00.000Z')
+    expect(bodies[1].sessionId).not.toBe(bodies[0].sessionId)
+  })
+
+  it('caps each active period after a suspended clock before pausing for a hidden tab', async () => {
+    vi.setSystemTime(new Date('2026-10-22T10:00:00.000Z'))
+    const { onActivity, endSession } = useReadingSession(1, () => ({ percentage: 10 }))
+    onActivity()
+
+    vi.setSystemTime(new Date('2026-11-08T15:45:00.000Z'))
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', writable: true, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: true, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(60_000)
+    endSession()
+
+    const body = JSON.parse((apiMock.mock.calls[0]![1] as { body: string }).body)
+    expect(body.durationSeconds).toBe(360)
+  })
+
   it('does not track elapsed time or save sessions when tracking is disabled', async () => {
     const trackingEnabled = ref(false)
     const { onActivity, elapsedMinutes, endSession } = useReadingSession(1, () => ({ percentage: 10 }), { trackingEnabled })

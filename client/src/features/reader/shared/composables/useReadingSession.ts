@@ -24,6 +24,7 @@ export function useReadingSession(bookFileId: number, getProgress: () => Progres
   let startedAt: Date | null = null
   let activeMs = 0
   let activeStart: number | null = null
+  let activeUntil = 0
   let idleTimer: ReturnType<typeof setTimeout> | null = null
   let startProgress: number | null = null
   let ended = false
@@ -38,7 +39,7 @@ export function useReadingSession(bookFileId: number, getProgress: () => Progres
 
   function getActiveMs(): number {
     if (activeStart === null) return activeMs
-    return activeMs + (Date.now() - activeStart)
+    return activeMs + Math.max(0, Math.min(Date.now(), activeUntil) - activeStart)
   }
 
   function updateElapsed() {
@@ -74,7 +75,7 @@ export function useReadingSession(bookFileId: number, getProgress: () => Progres
 
   function pauseTimer() {
     if (activeStart !== null) {
-      activeMs += Date.now() - activeStart
+      activeMs = getActiveMs()
       activeStart = null
     }
     clearIdleTimer()
@@ -88,6 +89,7 @@ export function useReadingSession(bookFileId: number, getProgress: () => Progres
 
   function resetIdleTimer() {
     clearIdleTimer()
+    activeUntil = Date.now() + IDLE_TIMEOUT_MS
     idleTimer = setTimeout(endSession, IDLE_TIMEOUT_MS)
   }
 
@@ -102,6 +104,12 @@ export function useReadingSession(bookFileId: number, getProgress: () => Progres
     if (!canTrack()) return
     // No active session or previous session ended (e.g. after idle timeout) - start fresh.
     if (!startedAt || ended) {
+      sessionId = createUuid()
+      startSession()
+      return
+    }
+    if (activeStart !== null && Date.now() >= activeUntil) {
+      endSession()
       sessionId = createUuid()
       startSession()
       return
@@ -122,12 +130,13 @@ export function useReadingSession(bookFileId: number, getProgress: () => Progres
       return
     }
     if (ended || !startedAt) return
+    const endedAt = new Date(activeStart === null ? Date.now() : Math.min(Date.now(), activeUntil))
     ended = true
     clearIdleTimer()
     stopElapsedInterval()
 
     if (activeStart !== null) {
-      activeMs += Date.now() - activeStart
+      activeMs = getActiveMs()
       activeStart = null
     }
 
@@ -135,7 +144,6 @@ export function useReadingSession(bookFileId: number, getProgress: () => Progres
 
     if (activeMs < MIN_SESSION_MS) return
 
-    const endedAt = new Date()
     const snap = getProgress()
     const durationSeconds = Math.floor(activeMs / 1000)
     const progressDelta = startProgress !== null ? Number((snap.percentage - startProgress).toFixed(4)) : null
