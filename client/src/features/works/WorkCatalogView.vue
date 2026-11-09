@@ -18,6 +18,7 @@ const {
   error,
   busy,
   canGroup,
+  canEditEdition,
   canMarkRead,
   markEditionsRead,
   editionsMarkedRead,
@@ -86,7 +87,7 @@ onMounted(load)
       <p v-if="editionsMarkedRead(work)" role="status" class="text-sm text-muted-foreground">{{ t('works.editionsMarkedRead') }}</p>
       <ul class="space-y-3">
         <li v-for="edition in work.editions" :key="edition.bookId" class="flex flex-wrap items-center gap-3">
-          <label v-if="canGroup && !edition.savedWorkId" class="flex items-center gap-2 text-sm">
+          <label v-if="canGroup && canEditEdition(edition) && !edition.savedWorkId" class="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
               :data-book-id="edition.bookId"
@@ -98,13 +99,14 @@ onMounted(load)
             {{ t('works.selectEdition', { id: edition.bookId }) }}
           </label>
           <RouterLink :to="`/book/${edition.bookId}`" class="underline">{{ edition.title || t('works.edition', { id: edition.bookId }) }}</RouterLink>
+          <span v-if="edition.libraryName" class="text-sm text-muted-foreground">{{ edition.libraryName }}</span>
           <span>{{ edition.language || t('works.unknownLanguage') }}</span>
           <span v-if="edition.narrators.length">{{ edition.narrators.join(', ') }}</span>
           <RouterLink v-for="file in edition.files" :key="file.id" :to="readerLink(edition, file)" class="rounded border border-border px-3 py-1">
             {{ t('works.openFormat', { format: file.format.toUpperCase() }) }}
           </RouterLink>
           <button
-            v-if="canGroup && edition.savedWorkId"
+            v-if="canEditEdition(edition) && edition.savedWorkId"
             :disabled="busy"
             class="text-sm underline"
             @click="ungroup(edition.savedWorkId, edition.bookId)"

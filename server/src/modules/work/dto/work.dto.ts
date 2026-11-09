@@ -32,3 +32,12 @@ export class GroupWorkDto {
   @IsString() @MinLength(1) @MaxLength(1000) title!: string;
   @IsArray() @ArrayMinSize(2) @ArrayMaxSize(100) @ArrayUnique() @IsInt({ each: true }) @Min(1, { each: true }) bookIds!: number[];
 }
+
+export class EditionSearchQueryDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MinLength(2)
+  @MaxLength(200)
+  search!: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) after = 0;
+}

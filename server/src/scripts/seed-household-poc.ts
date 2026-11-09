@@ -31,10 +31,7 @@ async function main() {
       .returning();
     const [folder] = await db.insert(schema.libraryFolders).values({ libraryId: library!.id, path: root }).returning();
     await db.insert(schema.userLibraryAccess).values({ userId: accounts[1]!.id, libraryId: library!.id, accessLevel: 'viewer' });
-    const [work] = await db
-      .insert(schema.works)
-      .values({ libraryId: library!.id, userId: accounts[0]!.id, title: 'The household sample' })
-      .returning();
+    const [work] = await db.insert(schema.works).values({ userId: accounts[0]!.id, title: 'The household sample' }).returning();
     const ids: number[] = [];
     for (const [directory, language, narrator] of [
       ['en', 'en', null],

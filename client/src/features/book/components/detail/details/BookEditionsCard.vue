@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import type { BookDetail } from '@bookorbit/types'
 import { formatBytes } from '@/lib/formatting'
 import { formatNumber, formatPercent } from '@/i18n/formatters'
+import BookEditionLinks from '@/features/works/components/BookEditionLinks.vue'
 import BookFormatChip from '@/features/book/components/BookFormatChip.vue'
 import { bookFormatEntries, formatKeyName, type BookFormatEntry } from '@/features/book/lib/book-formats'
 
@@ -133,5 +134,6 @@ function rowMeasure(row: BookFormatEntry): string {
       <p class="text-[11px] text-muted-foreground">{{ t('book.detail.details.filesOnDisk') }}</p>
       <p class="ml-auto text-[11px] font-semibold tabular-nums">{{ formatNumber(book.files.length) }}</p>
     </div>
+    <BookEditionLinks :book="book" />
   </section>
 </template>

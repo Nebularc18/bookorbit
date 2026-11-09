@@ -3700,6 +3700,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "work_id": {
+          "name": "work_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -3870,6 +3876,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "books_work_id_idx": {
+          "name": "books_work_id_idx",
+          "columns": [
+            {
+              "expression": "work_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3905,6 +3926,15 @@
           "tableFrom": "books",
           "tableTo": "library_folders",
           "columnsFrom": ["library_folder_id", "library_id"],
+          "columnsTo": ["id", "library_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "books_work_library_fk": {
+          "name": "books_work_library_fk",
+          "tableFrom": "books",
+          "tableTo": "works",
+          "columnsFrom": ["work_id", "library_id"],
           "columnsTo": ["id", "library_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -16436,6 +16466,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "remote_download": {
+          "name": "remote_download",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -16557,7 +16593,7 @@
       "checkConstraints": {
         "book_request_downloads_source_chk": {
           "name": "book_request_downloads_source_chk",
-          "value": "\"book_request_downloads\".\"source\" in ('magnet', 'torrent_file', 'direct_url', 'nzb_file')"
+          "value": "\"book_request_downloads\".\"source\" in ('magnet', 'torrent_file', 'direct_url', 'nzb_file', 'shelfmark')"
         },
         "book_request_downloads_status_chk": {
           "name": "book_request_downloads_status_chk",
@@ -24478,6 +24514,84 @@
           "value": "\"story_edits\".\"position\" is null or (\"story_edits\".\"position\" >= 0 and \"story_edits\".\"position\" <= 1)"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.works": {
+      "name": "works",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "library_id": {
+          "name": "library_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "works_library_idx": {
+          "name": "works_library_idx",
+          "columns": [
+            {
+              "expression": "library_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "works_library_id_libraries_id_fk": {
+          "name": "works_library_id_libraries_id_fk",
+          "tableFrom": "works",
+          "tableTo": "libraries",
+          "columnsFrom": ["library_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "works_user_id_users_id_fk": {
+          "name": "works_user_id_users_id_fk",
+          "tableFrom": "works",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "works_id_library_unique": {
+          "name": "works_id_library_unique",
+          "nullsNotDistinct": false,
+          "columns": ["id", "library_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },
