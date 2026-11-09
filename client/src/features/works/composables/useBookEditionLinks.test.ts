@@ -4,7 +4,7 @@ import type { BookDetail, EditionLinkItem } from '@bookorbit/types'
 import { apiJson } from '@/lib/api-json'
 import { useBookEditionLinks } from './useBookEditionLinks'
 
-const permission = vi.hoisted(() => vi.fn(() => true))
+const permission = vi.hoisted(() => vi.fn<() => boolean>(() => true))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/features/library/composables/useLibraryPermissions', () => ({ useLibraryPermissions: () => ({ hasLibraryPermission: permission }) }))
 vi.mock('@/lib/api-json', async (original) => ({ ...(await original<typeof import('@/lib/api-json')>()), apiJson: vi.fn<typeof apiJson>() }))
