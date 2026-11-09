@@ -1,16 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, gt, ilike, inArray, lte, ne, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gt, ilike, inArray, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { AUDIO_FORMAT_LIST, type WorkCatalogPage, type WorkEdition } from '@bookorbit/types';
+import { AUDIO_FORMAT_LIST, type EditionLinkPage, type WorkCatalogPage, type WorkEdition } from '@bookorbit/types';
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
-import { books, bookMetadata, works, userBookStatus } from '../../db/schema';
+import { books, bookMetadata, works, userBookStatus, libraries } from '../../db/schema';
 import { WorkCatalogQueryDto } from './dto/work.dto';
 import { workCatalogKey } from './work-catalog-key';
 import { escapeLikePattern } from '../../common/utils/accent-insensitive-search.utils';
 
 type Db = NodePgDatabase<typeof schema>;
-type DbExecutor = Pick<Db, 'select' | 'insert' | 'update'>;
+type DbExecutor = Pick<Db, 'select' | 'insert' | 'update' | 'execute'>;
 
 @Injectable()
 export class WorkRepository {
@@ -27,15 +27,33 @@ export class WorkRepository {
         .select({
           matchKey: key.as('match_key'),
           bookId: books.id,
+          libraryId: books.libraryId,
+          libraryName: libraries.name,
           workId: books.workId,
           editionTitle: sql<string | null>`${bookMetadata.title}`.as('edition_title'),
           title: sql<string>`coalesce(${works.title}, ${bookMetadata.title}, 'Untitled')`.as('title'),
           language: bookMetadata.language,
         })
         .from(books)
+        .innerJoin(libraries, eq(libraries.id, books.libraryId))
         .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
         .leftJoin(works, eq(works.id, books.workId))
-        .where(and(visible, eq(books.libraryId, query.libraryId), ne(books.status, 'processing'))),
+        .where(
+          and(
+            visible,
+            or(
+              eq(books.libraryId, query.libraryId),
+              inArray(
+                books.workId,
+                this.db
+                  .select({ workId: books.workId })
+                  .from(books)
+                  .where(and(visible, eq(books.libraryId, query.libraryId), ne(books.status, 'processing'))),
+              ),
+            ),
+            ne(books.status, 'processing'),
+          ),
+        ),
     );
     const partition = sql`partition by ${candidates.matchKey}`;
     // A new edition can join a saved group only when its metadata points to one group.
@@ -45,6 +63,8 @@ export class WorkRepository {
       this.db
         .select({
           bookId: candidates.bookId,
+          libraryId: candidates.libraryId,
+          libraryName: candidates.libraryName,
           editionTitle: candidates.editionTitle,
           savedWorkId: sql<number | null>`${candidates.workId}`.as('saved_work_id'),
           workId: sql<number | null>`coalesce(${candidates.workId}, ${anchorId})`.as('work_id'),
@@ -62,6 +82,8 @@ export class WorkRepository {
         .select({
           key: anchored.key,
           bookId: anchored.bookId,
+          libraryId: anchored.libraryId,
+          libraryName: anchored.libraryName,
           editionTitle: anchored.editionTitle,
           savedWorkId: anchored.savedWorkId,
           workId: anchored.workId,
@@ -102,6 +124,8 @@ export class WorkRepository {
         .select({
           key: matchingEditions.key,
           bookId: matchingEditions.bookId,
+          libraryId: matchingEditions.libraryId,
+          libraryName: matchingEditions.libraryName,
           editionTitle: matchingEditions.editionTitle,
           savedWorkId: matchingEditions.savedWorkId,
           title: matchingEditions.title,
@@ -124,6 +148,8 @@ export class WorkRepository {
       .select({
         key: ranked.key,
         bookId: ranked.bookId,
+        libraryId: ranked.libraryId,
+        libraryName: ranked.libraryName,
         title: ranked.editionTitle,
         language: ranked.language,
         total: ranked.total,
@@ -145,7 +171,16 @@ export class WorkRepository {
         hasMoreEditions: (editions.find((edition) => edition.key === row.key)?.total ?? 0) > 100,
         editions: editions
           .filter((edition) => edition.key === row.key)
-          .map(({ bookId, title, language, narrators, files, savedWorkId }) => ({ bookId, title, language, narrators, files, savedWorkId })),
+          .map(({ bookId, libraryId, libraryName, title, language, narrators, files, savedWorkId }) => ({
+            bookId,
+            libraryId,
+            libraryName,
+            title,
+            language,
+            narrators,
+            files,
+            savedWorkId,
+          })),
       })),
       hasMore: page.length > query.limit,
     };
@@ -174,6 +209,53 @@ export class WorkRepository {
       .limit(100);
   }
 
+  async editionLinks(bookId: number, visible: SQL | undefined, search?: { search: string; after: number }): Promise<EditionLinkPage> {
+    const rows = await this.db
+      .select({
+        bookId: books.id,
+        title: bookMetadata.title,
+        libraryId: books.libraryId,
+        libraryName: libraries.name,
+        language: bookMetadata.language,
+        workId: books.workId,
+        formats: sql<
+          string[]
+        >`array(select distinct f.format from book_files f where f.book_id = ${books.id} and f.role = 'content' and f.format is not null order by f.format)`,
+      })
+      .from(books)
+      .innerJoin(libraries, eq(libraries.id, books.libraryId))
+      .leftJoin(bookMetadata, eq(bookMetadata.bookId, books.id))
+      .where(
+        and(
+          visible,
+          ne(books.id, bookId),
+          ne(books.status, 'processing'),
+          search
+            ? and(gt(books.id, search.after), ilike(bookMetadata.title, `%${escapeLikePattern(search.search.trim())}%`))
+            : sql`${books.workId} = (select work_id from books where id = ${bookId})`,
+        ),
+      )
+      .orderBy(books.id)
+      .limit(search ? 26 : 101);
+    const limit = search ? 25 : 100;
+    return { items: rows.slice(0, limit), hasMore: rows.length > limit };
+  }
+
+  async lockGrouping(tx: DbExecutor) {
+    // Serialize membership changes so concurrent links cannot lose members or bypass the group size cap.
+    await tx.execute(sql`select pg_advisory_xact_lock(193582731, 1)`);
+  }
+
+  groupEditions(workIds: number[], tx: DbExecutor) {
+    return tx
+      .select({ id: books.id, libraryId: books.libraryId, workId: books.workId })
+      .from(books)
+      .where(inArray(books.workId, workIds))
+      .orderBy(books.id)
+      .limit(101)
+      .for('update');
+  }
+
   lockEditions(bookIds: number[], tx: DbExecutor) {
     return tx
       .select({ id: books.id, libraryId: books.libraryId, workId: books.workId })
@@ -190,14 +272,14 @@ export class WorkRepository {
       .where(and(visible, inArray(books.id, bookIds), ne(books.status, 'processing')));
   }
 
-  async createAndAssign(libraryId: number, userId: number, title: string, bookIds: number[], tx: DbExecutor) {
-    const [work] = await tx.insert(works).values({ libraryId, userId, title }).returning();
-    await tx.update(books).set({ workId: work!.id }).where(inArray(books.id, bookIds));
-    return { id: work!.id };
+  async createAndAssign(userId: number, title: string, bookIds: number[], tx: DbExecutor, workId?: number) {
+    const id = workId ?? (await tx.insert(works).values({ userId, title }).returning({ id: works.id }))[0]!.id;
+    await tx.update(books).set({ workId: id }).where(inArray(books.id, bookIds));
+    return { id };
   }
 
-  detachEdition(workId: number, bookId: number) {
-    return this.db
+  detachEdition(workId: number, bookId: number, tx: DbExecutor) {
+    return tx
       .update(books)
       .set({ workId: null })
       .where(and(eq(books.id, bookId), eq(books.workId, workId)))

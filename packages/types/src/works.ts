@@ -1,4 +1,6 @@
 export interface WorkEdition {
+  libraryId?: number;
+  libraryName?: string;
   bookId: number;
   title: string | null;
   language: string | null;
@@ -22,4 +24,19 @@ export interface WorkCatalogPage {
 export interface LinkedUnreadEditions {
   bookIds: number[];
   automaticReadSync?: boolean;
+}
+
+export interface EditionLinkItem {
+  bookId: number;
+  title: string | null;
+  libraryId: number;
+  libraryName: string;
+  language: string | null;
+  formats: string[];
+  workId: number | null;
+}
+
+export interface EditionLinkPage {
+  items: EditionLinkItem[];
+  hasMore: boolean;
 }

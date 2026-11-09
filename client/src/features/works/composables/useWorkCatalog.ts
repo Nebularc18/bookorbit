@@ -94,6 +94,9 @@ export function useWorkCatalog() {
       busy.value = false
     }
   }
+  function canEditEdition(edition: WorkEdition) {
+    return hasLibraryPermission(Permission.LibraryEditMetadata, edition.libraryId ?? libraryId.value, 'editor')
+  }
   function toggleEditionSelection(event: Event) {
     const input = event.target as HTMLInputElement
     const id = Number(input.dataset.bookId)
@@ -156,6 +159,7 @@ export function useWorkCatalog() {
     error,
     busy,
     canGroup,
+    canEditEdition,
     canMarkRead,
     markEditionsRead,
     editionsMarkedRead,

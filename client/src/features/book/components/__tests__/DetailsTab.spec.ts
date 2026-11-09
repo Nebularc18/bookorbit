@@ -70,6 +70,7 @@ const globalStubs = {
     DialogContent: { template: '<div><slot /></div>' },
     DialogClose: { template: '<button><slot /></button>' },
     BookCoverLightbox: true,
+    BookEditionLinks: true,
     AddToCollectionSheet: true,
     MoveToLibrarySheet: true,
     SendBookDialog: true,

@@ -19,8 +19,8 @@ describe('WorkRepository catalog', () => {
     const { repository, query } = fixture([
       [[key, null, 'To All the Boys']],
       [
-        [key, 1, 'To All the Boys (2014)', 'en', 2, [], [{ id: 10, format: 'epub' }]],
-        [key, 2, 'To All the Boys (2020)', 'en', 2, ['Narrator'], [{ id: 20, format: 'm4b' }]],
+        [key, 1, 7, 'English books', 'To All the Boys (2014)', 'en', 2, [], [{ id: 10, format: 'epub' }]],
+        [key, 2, 8, 'Audio books', 'To All the Boys (2020)', 'en', 2, ['Narrator'], [{ id: 20, format: 'm4b' }]],
       ],
     ]);
     const result = await repository.catalog(Object.assign(new WorkCatalogQueryDto(), { libraryId: 7 }), eq(schema.books.libraryId, 7));
@@ -46,7 +46,7 @@ describe('WorkRepository catalog', () => {
         ['w:1', 1, 'A'],
         ['w:2', 2, 'B'],
       ],
-      [['w:1', 1, 'A', 'en', 101, [], []]],
+      [['w:1', 1, 7, 'English books', 'A', 'en', 101, [], []]],
     ]);
     const result = await repository.catalog(
       Object.assign(new WorkCatalogQueryDto(), { libraryId: 7, limit: 1, after: 'w:0' }),
@@ -82,5 +82,35 @@ describe('WorkRepository unread linked editions', () => {
     expect(config.text).toContain("<> 'read'");
     expect(config.text).toContain('limit');
     expect(params).toEqual(expect.arrayContaining([9, 1, 7, 3, 100, 'processing']));
+  });
+});
+
+describe('WorkRepository edition linking', () => {
+  it('paginates title searches, escapes wildcards and returns language, library and format', async () => {
+    const { repository, query } = fixture([[...Array.from({ length: 26 }, (_, i) => [i + 2, 'Dollar', 4, 'Swedish books', 'sv', null, ['epub']])]]);
+    const result = await repository.editionLinks(1, eq(schema.books.libraryId, 4), { search: 'Dollar%', after: 10 });
+    expect(result.items).toHaveLength(25);
+    expect(result.hasMore).toBe(true);
+    expect(result.items[0]).toEqual({
+      bookId: 2,
+      title: 'Dollar',
+      libraryId: 4,
+      libraryName: 'Swedish books',
+      language: 'sv',
+      workId: null,
+      formats: ['epub'],
+    });
+    const [config, params] = query.mock.calls[0]!;
+    expect(config.text).toContain('"books"."id" >');
+    expect(config.text).toContain('"books"."library_id" =');
+    expect(config.text).toContain('"books"."id" <>');
+    expect(params).toEqual(expect.arrayContaining([1, 4, 10, 26, '%Dollar\\%%', 'processing']));
+  });
+
+  it('lists only saved group members with a bounded response', async () => {
+    const { repository, query } = fixture([[]]);
+    await expect(repository.editionLinks(1, eq(schema.books.libraryId, 4))).resolves.toEqual({ items: [], hasMore: false });
+    expect(query.mock.calls[0]![0].text).toContain('select work_id from books where id =');
+    expect(query.mock.calls[0]![1]).toContain(101);
   });
 });
