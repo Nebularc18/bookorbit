@@ -9,6 +9,7 @@ export const AuthenticationMethod = {
   MagicLink: "magic_link",
   Setup: "setup",
   Legacy: "legacy",
+  ApiKey: "api_key",
 } as const;
 
 export type AuthenticationMethod = (typeof AuthenticationMethod)[keyof typeof AuthenticationMethod];
@@ -50,6 +51,8 @@ export interface UserSettings {
   sidebarConfig?: import("./sidebar").SidebarConfig;
   /** Separate from sidebarConfig so an older client rewriting that key cannot wipe the layout. */
   sidebarLayout?: import("./sidebar").SidebarLayout | null;
+  /** Separate key so an older client rewriting dashboardConfig cannot wipe it. */
+  libraryVisibility?: import("./library-visibility").LibraryVisibilitySettings;
   achievementPreferences?: {
     enabled?: boolean;
   };

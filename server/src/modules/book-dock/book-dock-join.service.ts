@@ -149,7 +149,7 @@ export function joinKeysFor(metadata: BookDockMetadata | null): JoinKeys {
 }
 
 /** Whether a book could take the file as another format: never a second copy of a format, never a second audio set. */
-function acceptsFormats(bookFormats: string[], fileFormats: string[]): boolean {
+export function acceptsFormats(bookFormats: string[], fileFormats: string[]): boolean {
   if (fileFormats.some((format) => bookFormats.includes(format))) return false;
   return !(fileFormats.some((format) => isAudioFormat(format)) && bookFormats.some((format) => isAudioFormat(format)));
 }
@@ -250,7 +250,7 @@ export class BookDockJoinService {
     if (library.organizationMode !== 'book_per_folder') return false;
     let answer = cache.get(library.id);
     if (!answer) {
-      answer = this.libraryService.verifyUserAccessLevel(requester.id, library.id, requester.isSuperuser, 'editor').then(
+      answer = this.libraryService.verifyAccessLevel(requester, library.id, 'editor').then(
         () => true,
         (error: unknown) => {
           if (error instanceof ForbiddenException) return false;

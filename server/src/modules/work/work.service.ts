@@ -19,7 +19,7 @@ export class WorkService {
   ) {}
 
   async catalog(query: WorkCatalogQueryDto, user: RequestUser): Promise<WorkCatalogPage> {
-    await this.libraryService.verifyUserAccess(user.id, query.libraryId, user.isSuperuser);
+    await this.libraryService.verifyAccess(user, query.libraryId);
     const visible = this.queryBuilder.buildWhere(null, {
       accessibleLibraryIds: await this.libraryService.findAccessibleLibraryIds(user),
       userId: user.id,
@@ -66,7 +66,7 @@ export class WorkService {
         if (editions.length > 100) throw new BadRequestException('A group can contain at most 100 editions');
         const libraryIds = [...new Set(editions.map((row) => row.libraryId))];
         for (const libraryId of libraryIds) {
-          await this.libraryService.verifyUserAccessLevel(user.id, libraryId, user.isSuperuser, 'editor');
+          await this.libraryService.verifyAccessLevel(user, libraryId, 'editor');
         }
         const visible = this.queryBuilder.buildWhere(null, {
           accessibleLibraryIds: libraryIds,

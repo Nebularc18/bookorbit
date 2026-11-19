@@ -3,13 +3,18 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { Test } from '@nestjs/testing';
 
 import { buildEmptyJsonBodyStream, markEmptyBodyInjected, shouldInjectEmptyJsonBody } from '../../common/utils/bootstrap.utils';
-import { AppAttestGuard } from './app-attest.guard';
+import { AppAttestGuard, RequireAppAttest } from './app-attest.guard';
+import type { AppAttestPolicy } from './app-attest.policy';
 import { APP_ATTEST_HEADERS, AppAttestService, appAttestBodySha256, appAttestClientData } from './app-attest.service';
 import { AppAttestStore } from './app-attest.store';
 import { fixtureAssertion, fixtureAttestation } from './test-fixtures/app-attest-test-helpers';
 import { ATTESTATION_FIXTURE } from './test-fixtures/attestation-fixture';
 
 const fixture = ATTESTATION_FIXTURE;
+
+function contextFor(user: unknown): ExecutionContext {
+  return { switchToHttp: () => ({ getRequest: () => ({ user, method: 'GET', url: '/probe', headers: {} }) }) } as unknown as ExecutionContext;
+}
 
 @Injectable()
 class StubAuthGuard implements CanActivate {
@@ -33,13 +38,25 @@ class ProbeController {
   }
 }
 
+// Decorators apply from the bottom up, so the stub's user is set before App Attest runs.
+@Controller('probe-unsigned')
+@RequireAppAttest({ unsignedOutsideProduction: true })
+@UseGuards(StubAuthGuard)
+class UnsignedProbeController {
+  @Get()
+  read() {
+    return { ok: true };
+  }
+}
+
 describe('AppAttestGuard', () => {
   let app: NestFastifyApplication;
   let counter = 0;
+  const policy: AppAttestPolicy = { appIds: [fixture.appId], allowDevelopment: true, trustedRoots: [fixture.rootPem], acceptUnsigned: false };
 
   beforeAll(async () => {
     const store = new AppAttestStore();
-    const service = new AppAttestService({ appIds: [fixture.appId], allowDevelopment: true, trustedRoots: [fixture.rootPem] }, store);
+    const service = new AppAttestService(policy, store);
     store.addChallenge(fixture.challenge, 7);
     service.registerKey({ id: 7 } as never, {
       keyId: fixture.keyId,
@@ -48,7 +65,7 @@ describe('AppAttestGuard', () => {
     });
 
     const module = await Test.createTestingModule({
-      controllers: [ProbeController],
+      controllers: [ProbeController, UnsignedProbeController],
       providers: [{ provide: AppAttestService, useValue: service }, AppAttestGuard, StubAuthGuard],
     }).compile();
     app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), { logger: false, rawBody: true });
@@ -131,5 +148,51 @@ describe('AppAttestGuard', () => {
     const response = await app.inject({ method: 'GET', url: '/api/v1/probe' });
     expect(response.statusCode).toBe(403);
     expect(errorCodeOf(response)).toBe('APP_ATTEST_REQUIRED');
+  });
+
+  describe('on a route that accepts unsigned requests outside production', () => {
+    afterEach(() => {
+      policy.acceptUnsigned = false;
+    });
+
+    it('accepts a request with no assertion when the server is not in production', async () => {
+      policy.acceptUnsigned = true;
+      expect((await app.inject({ method: 'GET', url: '/api/v1/probe-unsigned' })).statusCode).toBe(200);
+    });
+
+    it('still verifies a request that carries an assertion', async () => {
+      policy.acceptUnsigned = true;
+      const forged = {
+        [APP_ATTEST_HEADERS.keyId]: 'A'.repeat(43) + '=',
+        [APP_ATTEST_HEADERS.assertion]: 'AAAA',
+        [APP_ATTEST_HEADERS.timestamp]: String(Date.now()),
+      };
+      const response = await app.inject({ method: 'GET', url: '/api/v1/probe-unsigned', headers: forged });
+      expect(response.statusCode).toBe(403);
+      expect(errorCodeOf(response)).toBe('APP_ATTEST_KEY_UNKNOWN');
+      const partial = await app.inject({ method: 'GET', url: '/api/v1/probe-unsigned', headers: { [APP_ATTEST_HEADERS.keyId]: fixture.keyId } });
+      expect(errorCodeOf(partial)).toBe('APP_ATTEST_REQUIRED');
+      const url = '/api/v1/probe-unsigned';
+      expect((await app.inject({ method: 'GET', url, headers: attest('GET', url, Buffer.alloc(0)) })).statusCode).toBe(200);
+    });
+
+    it('refuses a request with no assertion on a production server', async () => {
+      const response = await app.inject({ method: 'GET', url: '/api/v1/probe-unsigned' });
+      expect(response.statusCode).toBe(403);
+      expect(errorCodeOf(response)).toBe('APP_ATTEST_REQUIRED');
+    });
+
+    it('leaves every other guarded route refusing unsigned requests', async () => {
+      policy.acceptUnsigned = true;
+      expect((await app.inject({ method: 'GET', url: '/api/v1/probe' })).statusCode).toBe(403);
+    });
+  });
+
+  it('refuses an API key before verifying, because a key is never an attested app', () => {
+    const verifyRequest = vi.fn();
+    const keyUser = { id: 7, credential: { kind: 'api_key', keyId: 3 } };
+    const guard = new AppAttestGuard({ verifyRequest } as never);
+    expect(() => guard.canActivate(contextFor(keyUser))).toThrow('API keys cannot use this route');
+    expect(verifyRequest).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 # Debian trixie for ffmpeg 7: STAlign's audiobook probe passes `ffprobe -output_format`, which the
 # ffmpeg 5.1 in bookworm rejects, failing every job in its first stage.
-ARG NODE_IMAGE=node:26.12.1-trixie-slim
+ARG NODE_IMAGE=node:26.13.1-trixie-slim
 
 FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
@@ -42,6 +42,8 @@ RUN cd /deploy && \
 
 FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
+# The worker never runs npm, and the npm bundled with the base image carries its own copies of
+# packages such as undici and brace-expansion that the workspace overrides cannot reach.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends apt ca-certificates ffmpeg libapt-pkg7.0 tini zlib1g && \
     rm -rf /var/lib/apt/lists/* && \
