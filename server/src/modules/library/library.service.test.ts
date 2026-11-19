@@ -20,7 +20,9 @@ import { readdir, rm, stat } from 'fs/promises';
 import { ACHIEVEMENT_EVENT_LIBRARY_CATALOG_CHANGED } from '../achievement/achievement-events.service';
 import { isPrimaryFormat } from '../scanner/lib/classify';
 import { LibraryOperationGate } from '../../common/services/library-operation-gate.service';
+import { LibraryScopeService } from '../../common/library-scope/library-scope.service';
 import { LibraryService } from './library.service';
+import { LibraryLifecycleService } from './library-lifecycle.service';
 
 const mockReaddir = readdir as MockedFunction<typeof readdir>;
 const mockRm = rm as MockedFunction<typeof rm>;
@@ -36,13 +38,16 @@ function dirent(name: string, kind: 'file' | 'dir') {
 }
 
 describe('LibraryService', () => {
+  const scopeRepo = {
+    findAllIds: vi.fn(),
+    findExistingIds: vi.fn(),
+    findGrantedLevels: vi.fn(),
+    findGrantedLevel: vi.fn(),
+    findIsSuperuser: vi.fn(),
+  };
   const libraryRepo = {
-    hasUserAccess: vi.fn(),
-    findUserAccessLevel: vi.fn(),
     findAll: vi.fn(),
     findAllForUser: vi.fn(),
-    findAllIds: vi.fn(),
-    findAccessibleIdsForUser: vi.fn(),
     findAllFolders: vi.fn(),
     findFoldersByLibraryIds: vi.fn(),
     findById: vi.fn(),
@@ -88,12 +93,14 @@ describe('LibraryService', () => {
   let service: LibraryService;
   let readingEvents: ReadingAttemptEventsService;
   let libraryGate: LibraryOperationGate;
+  let lifecycle: LibraryLifecycleService;
 
   beforeEach(() => {
     vi.resetAllMocks();
     config.get.mockReturnValue('/books');
     readingEvents = new ReadingAttemptEventsService();
     libraryGate = new LibraryOperationGate();
+    lifecycle = new LibraryLifecycleService();
     service = new LibraryService(
       libraryRepo as any,
       config as any,
@@ -106,6 +113,8 @@ describe('LibraryService', () => {
       regexMetadata as any,
       readingEvents,
       libraryGate,
+      new LibraryScopeService(scopeRepo as any),
+      lifecycle,
     );
 
     libraryRepo.findById.mockResolvedValue([{ id: 1 }]);
@@ -147,8 +156,11 @@ describe('LibraryService', () => {
   });
 
   it('findAccessibleLibraryIds reads all IDs for superusers and scoped IDs for normal users', async () => {
-    libraryRepo.findAllIds.mockResolvedValue([{ id: 1 }, { id: 2 }]);
-    libraryRepo.findAccessibleIdsForUser.mockResolvedValue([{ id: 3 }, { id: 4 }]);
+    scopeRepo.findAllIds.mockResolvedValue([1, 2]);
+    scopeRepo.findGrantedLevels.mockResolvedValue([
+      { id: 3, accessLevel: 'viewer' },
+      { id: 4, accessLevel: 'editor' },
+    ]);
 
     await expect(service.findAccessibleLibraryIds({ id: 99, isSuperuser: true, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any)).resolves.toEqual(
       [1, 2],
@@ -159,18 +171,18 @@ describe('LibraryService', () => {
   });
 
   it('findEditableLibraryIds reads all IDs for superusers and editor-or-owner IDs for normal users', async () => {
-    libraryRepo.findAllIds.mockResolvedValue([{ id: 1 }, { id: 2 }]);
-    libraryRepo.findAccessibleIdsForUser.mockResolvedValue([{ id: 4 }]);
+    scopeRepo.findAllIds.mockResolvedValue([1, 2]);
+    scopeRepo.findGrantedLevels.mockResolvedValue([{ id: 4, accessLevel: 'editor' }]);
 
     await expect(service.findEditableLibraryIds({ id: 99, isSuperuser: true, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any)).resolves.toEqual([
       1, 2,
     ]);
-    expect(libraryRepo.findAccessibleIdsForUser).not.toHaveBeenCalled();
+    expect(scopeRepo.findGrantedLevels).not.toHaveBeenCalled();
 
     await expect(service.findEditableLibraryIds({ id: 42, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES } as any)).resolves.toEqual([
       4,
     ]);
-    expect(libraryRepo.findAccessibleIdsForUser).toHaveBeenCalledWith(42, ['editor', 'owner']);
+    expect(scopeRepo.findGrantedLevels).toHaveBeenCalledWith(42, ['editor', 'owner']);
   });
 
   it('findOne returns library details and normalizes organization mode', async () => {
@@ -224,7 +236,7 @@ describe('LibraryService', () => {
       { rules: [{ ...first, pattern: '(?<title>.*)' }, second] },
     ])('validates and persists an actual change without a library grant: %j', async (changed) => {
       await service.update(2, { regexMetadata: changed });
-      expect(libraryRepo.hasUserAccess).not.toHaveBeenCalled();
+      expect(scopeRepo.findGrantedLevel).not.toHaveBeenCalled();
       expect(regexMetadata.validate).toHaveBeenCalledWith(changed);
       expect(libraryRepo.update).toHaveBeenCalledWith(2, { regexMetadata: changed });
     });
@@ -249,21 +261,38 @@ describe('LibraryService', () => {
     });
   });
 
-  it('verifyUserAccess bypasses lookup for superusers', async () => {
-    await service.verifyUserAccess(1, 2, true);
-    expect(libraryRepo.hasUserAccess).not.toHaveBeenCalled();
+  it('verifyAccess bypasses lookup for superusers', async () => {
+    await service.verifyAccess({ id: 1, isSuperuser: true }, 2);
+    expect(scopeRepo.findGrantedLevel).not.toHaveBeenCalled();
   });
 
-  it('verifyUserAccess throws when user has no library access', async () => {
-    libraryRepo.hasUserAccess.mockResolvedValue(false);
-    await expect(service.verifyUserAccess(1, 2, false)).rejects.toThrow('No access to this library');
+  it('verifyAccess throws when user has no library access', async () => {
+    scopeRepo.findGrantedLevel.mockResolvedValue(null);
+    await expect(service.verifyAccess({ id: 1, isSuperuser: false }, 2)).rejects.toThrow('No access to this library');
   });
 
-  it('verifyUserAccessLevel enforces the required library role', async () => {
-    libraryRepo.findUserAccessLevel.mockResolvedValue('viewer');
+  it('verifyAccessLevel enforces the required library role', async () => {
+    scopeRepo.findGrantedLevel.mockResolvedValue('viewer');
 
-    await expect(service.verifyUserAccessLevel(1, 2, false, 'editor')).rejects.toThrow('Insufficient library access level');
-    await expect(service.verifyUserAccessLevel(1, 2, true, 'owner')).resolves.toBeUndefined();
+    await expect(service.verifyAccessLevel({ id: 1, isSuperuser: false }, 2, 'editor')).rejects.toThrow('Insufficient library access level');
+    await expect(service.verifyAccessLevel({ id: 1, isSuperuser: true }, 2, 'owner')).resolves.toBeUndefined();
+  });
+
+  it('findAll narrows a library-limited API key to its libraries and caps a read key at viewer', async () => {
+    scopeRepo.findGrantedLevels.mockResolvedValue([
+      { id: 10, accessLevel: 'editor' },
+      { id: 11, accessLevel: 'viewer' },
+    ]);
+    libraryRepo.findAllForUser.mockResolvedValue([
+      { id: 10, name: 'A', accessLevel: 'editor' },
+      { id: 11, name: 'B', accessLevel: 'viewer' },
+    ]);
+    libraryRepo.findFoldersByLibraryIds.mockResolvedValue([]);
+    const credential = { kind: 'api_key', keyId: 1, keyName: 'k', audience: 'api', access: 'read', libraryIds: [10], ownerIsSuperuser: false };
+
+    const result = await service.findAll({ id: 7, isSuperuser: false, contentFilters: EMPTY_CONTENT_FILTER_RULES, credential } as any);
+
+    expect(result.map(({ id, accessLevel }: any) => ({ id, accessLevel }))).toEqual([{ id: 10, accessLevel: 'viewer' }]);
   });
 
   it.each([undefined, ['regex', 'embedded']])('preserves regex configuration with precedence %j on create', async (metadataPrecedence) => {
@@ -738,6 +767,91 @@ describe('LibraryService', () => {
     expect(libraryGate.isHeld(4)).toBe(false);
   });
 
+  describe('lifecycle listeners', () => {
+    it('tells listeners about a delete first and follows up only once the library is gone', async () => {
+      libraryRepo.findById.mockResolvedValue([{ id: 4, name: 'Fiction' }]);
+      libraryRepo.findBookIdsByLibrary.mockResolvedValue([]);
+      const order: string[] = [];
+      lifecycle.register({
+        prepareLibraryDelete: (library) => {
+          order.push(`prepare ${library.id} ${library.name}`);
+          return Promise.resolve(() => {
+            order.push('follow-up');
+            return Promise.resolve();
+          });
+        },
+      });
+      libraryRepo.delete.mockImplementation(() => {
+        order.push('delete');
+        return Promise.resolve();
+      });
+
+      await service.remove(4);
+
+      expect(order).toEqual(['prepare 4 Fiction', 'delete', 'follow-up']);
+    });
+
+    it('skips the follow-up when the delete fails', async () => {
+      libraryRepo.findById.mockResolvedValue([{ id: 4, name: 'Fiction' }]);
+      libraryRepo.findBookIdsByLibrary.mockResolvedValue([]);
+      const followUp = vi.fn().mockResolvedValue(undefined);
+      lifecycle.register({ prepareLibraryDelete: () => Promise.resolve(followUp) });
+      libraryRepo.delete.mockRejectedValueOnce(new Error('Delete failed'));
+
+      await expect(service.remove(4)).rejects.toThrow('Delete failed');
+      expect(followUp).not.toHaveBeenCalled();
+    });
+
+    it('keeps a finished delete when a follow-up fails', async () => {
+      libraryRepo.findById.mockResolvedValue([{ id: 4, name: 'Fiction' }]);
+      libraryRepo.findBookIdsByLibrary.mockResolvedValue([]);
+      lifecycle.register({ prepareLibraryDelete: () => Promise.resolve(() => Promise.reject(new Error('listener down'))) });
+
+      await expect(service.remove(4)).resolves.toBeUndefined();
+      expect(libraryRepo.delete).toHaveBeenCalledWith(4);
+    });
+
+    it('tells listeners which folders a library loses, around their removal', async () => {
+      libraryRepo.findById.mockResolvedValue([{ id: 3, name: 'Current', icon: 'BookOpen', watch: false }]);
+      libraryRepo.findByName.mockResolvedValue([]);
+      libraryRepo.update.mockResolvedValue([{ id: 3, name: 'Current' }]);
+      libraryRepo.findFoldersByLibrary.mockResolvedValue([
+        { id: 1, path: '/media/a' },
+        { id: 2, path: '/media/b' },
+      ]);
+      const order: string[] = [];
+      lifecycle.register({
+        prepareFoldersRemove: (libraryId, folderIds) => {
+          order.push(`prepare ${libraryId} ${folderIds.join(',')}`);
+          return Promise.resolve(() => {
+            order.push('follow-up');
+            return Promise.resolve();
+          });
+        },
+      });
+      libraryRepo.deleteFolder.mockImplementation((id: number) => {
+        order.push(`delete ${id}`);
+        return Promise.resolve();
+      });
+
+      await service.update(3, { folders: ['/media/a'] } as any);
+
+      expect(order).toEqual(['prepare 3 2', 'delete 2', 'follow-up']);
+    });
+
+    it('asks listeners about new folders only, and stops before saving when one refuses', async () => {
+      libraryRepo.findById.mockResolvedValue([{ id: 3, name: 'Current', icon: 'BookOpen', watch: false }]);
+      libraryRepo.findAllFolderPaths.mockResolvedValue([{ libraryId: 3, path: '/media/a', libraryName: 'Current' }]);
+      const assertFolderPathsAllowed = vi.fn().mockRejectedValue(new ConflictException({ errorCode: 'LIBRARY_FOLDER_OVERLAPS_BOOK_DOCK' }));
+      lifecycle.register({ assertFolderPathsAllowed });
+
+      await expect(service.update(3, { folders: ['/media/a', '/data/book-dock/x'] } as any)).rejects.toBeInstanceOf(ConflictException);
+
+      expect(assertFolderPathsAllowed).toHaveBeenCalledWith(['/data/book-dock/x']);
+      expect(libraryRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
   it('remove throws when library does not exist', async () => {
     libraryRepo.findById.mockResolvedValue([]);
 
@@ -826,7 +940,10 @@ describe('LibraryService', () => {
   });
 
   it('getOverview scopes to the caller and merges stats with the last scan', async () => {
-    libraryRepo.findAccessibleIdsForUser.mockResolvedValue([{ id: 1 }, { id: 2 }]);
+    scopeRepo.findGrantedLevels.mockResolvedValue([
+      { id: 1, accessLevel: 'viewer' },
+      { id: 2, accessLevel: 'viewer' },
+    ]);
     libraryRepo.getStatsForLibraries.mockResolvedValue(
       new Map([
         [1, { totalBooks: 381, totalSizeBytes: 727, formatCounts: { epub: 305 } }],
@@ -847,8 +964,8 @@ describe('LibraryService', () => {
 
     const result = await service.getOverview({ id: 7, isSuperuser: false } as any);
 
-    expect(libraryRepo.findAccessibleIdsForUser).toHaveBeenCalledWith(7);
-    expect(libraryRepo.findAllIds).not.toHaveBeenCalled();
+    expect(scopeRepo.findGrantedLevels).toHaveBeenCalledWith(7, undefined);
+    expect(scopeRepo.findAllIds).not.toHaveBeenCalled();
     expect(libraryRepo.getStatsForLibraries).toHaveBeenCalledWith([1, 2]);
     expect(result).toEqual([
       { libraryId: 1, totalBooks: 381, totalSizeBytes: 727, formatCounts: { epub: 305 }, lastScan },
@@ -857,7 +974,7 @@ describe('LibraryService', () => {
   });
 
   it('getOverview returns nothing and issues no queries when the caller has no libraries', async () => {
-    libraryRepo.findAllIds.mockResolvedValue([]);
+    scopeRepo.findAllIds.mockResolvedValue([]);
 
     const result = await service.getOverview({ id: 1, isSuperuser: true } as any);
 
@@ -867,7 +984,7 @@ describe('LibraryService', () => {
   });
 
   it('getOverview maps repository overflow errors to InternalServerErrorException', async () => {
-    libraryRepo.findAllIds.mockResolvedValue([{ id: 1 }]);
+    scopeRepo.findAllIds.mockResolvedValue([1]);
     libraryRepo.getStatsForLibraries.mockRejectedValue(new RangeError('overflow'));
 
     await expect(service.getOverview({ id: 1, isSuperuser: true } as any)).rejects.toBeInstanceOf(InternalServerErrorException);

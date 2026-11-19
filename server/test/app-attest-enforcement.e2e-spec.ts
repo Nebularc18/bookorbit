@@ -1,16 +1,20 @@
+import { randomBytes } from 'node:crypto';
+
 import { GUARDS_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import { ModulesContainer } from '@nestjs/core';
 
 import { AppAttestGuard } from '../src/modules/app-attest/app-attest.guard';
+import { androidAttestClientData, appAttestBodySha256 } from '../src/modules/app-attest/app-attest.service';
+import { androidAssertion, androidChain } from '../src/modules/app-attest/test-fixtures/android-attestation-test-helpers';
 import { closeE2EContext, createE2EContext, type E2EContext } from './e2e/app-harness';
 
 const TIMEOUT = 120_000;
 const ID = '0b6c1f0e-8d3a-4c43-9f0f-2a5f2f1d7c11';
 
 /**
- * Every route only the iOS app calls. Adding or removing one means changing `AppAttestPolicy` in the
- * iOS app in the same release: a route the app does not sign is refused, and a signed route the
- * server does not guard gains nothing.
+ * Every route only the mobile apps call. Adding or removing one means changing `AppAttestPolicy` in
+ * the iOS app and `AttestedRoutes` in the Android app in the same release: a route an app does not
+ * sign is refused, and a signed route the server does not guard gains nothing.
  */
 const GUARDED_ROUTES: Array<[method: string, path: string]> = [
   ['GET', '/notebook/entries'],
@@ -41,9 +45,6 @@ const GUARDED_ROUTES: Array<[method: string, path: string]> = [
   ['DELETE', `/books/1/journal/${ID}`],
   ['POST', `/books/1/journal/${ID}/restore`],
   ['DELETE', `/books/1/journal/${ID}/permanent`],
-  ['GET', '/books/files/1/progress'],
-  ['POST', '/books/files/1/progress'],
-  ['DELETE', '/books/files/1/progress'],
   ['GET', '/user-preferences/annotation-colors'],
   ['PUT', '/user-preferences/annotation-colors'],
   ['GET', '/uploads/capabilities'],
@@ -62,6 +63,29 @@ const GUARDED_ROUTES: Array<[method: string, path: string]> = [
   ['POST', '/mobile/shelf-match'],
   ['GET', '/mobile/books/1/story-edits'],
   ['PUT', `/mobile/books/1/story-edits/${ID}`],
+  ['GET', '/mobile/books/files/1/story-guide?format=1'],
+  ['GET', '/mobile/books/files/1/story-guide/fixes'],
+  ['PUT', `/mobile/books/files/1/story-guide/fixes/${ID}`],
+  ['POST', '/mobile/vision-scan'],
+  ['POST', '/mobile/reading-help'],
+];
+
+/**
+ * Guarded routes that, outside production, also accept a request with no assertion at all, each
+ * with a body that passes validation and the answer that shows the request got past the guard:
+ * no such book file, a photo that is not an image, or a recap with more passages than it reads.
+ */
+const UNSIGNED_OUTSIDE_PRODUCTION: Array<[method: string, path: string, body: object | undefined, status: number]> = [
+  ['GET', '/mobile/books/files/1/story-guide?format=1', undefined, 404],
+  ['GET', '/mobile/books/files/1/story-guide/fixes', undefined, 404],
+  [
+    'PUT',
+    `/mobile/books/files/1/story-guide/fixes/${ID}`,
+    { kind: 'hide', target: { key: 'tom', names: [] }, data: {}, updatedAt: '2026-11-10T10:00:00.000Z' },
+    404,
+  ],
+  ['POST', '/mobile/vision-scan', { kind: 'cover', image: 'AAAA' }, 400],
+  ['POST', '/mobile/reading-help', { kind: 'recap-note', fileId: 1, language: 'en', passages: ['He came in.', 'She left.'] }, 400],
 ];
 
 const UNGUARDED_ROUTES: Array<[method: string, path: string]> = [
@@ -71,11 +95,18 @@ const UNGUARDED_ROUTES: Array<[method: string, path: string]> = [
   ['GET', '/reading-history/summary'],
 ];
 
+const THIRD_PARTY_PROGRESS_ROUTES: Array<[method: string, path: string]> = [
+  ['GET', '/books/files/1/progress'],
+  ['POST', '/books/files/1/progress'],
+  ['DELETE', '/books/files/1/progress'],
+];
+
 describe('App Attest enforcement (e2e)', { timeout: TIMEOUT }, () => {
   let ctx: E2EContext;
 
   beforeAll(async () => {
-    ctx = await createE2EContext({ isolateAppData: true, realAppAttest: true });
+    // A production server: every guarded route refuses a request with no assertion.
+    ctx = await createE2EContext({ isolateAppData: true, realAppAttest: true, appAttestNodeEnv: 'production' });
   });
 
   afterAll(async () => {
@@ -125,6 +156,12 @@ describe('App Attest enforcement (e2e)', { timeout: TIMEOUT }, () => {
     }
   });
 
+  it('leaves per-file progress routes open to third-party clients', async () => {
+    for (const [method, path] of THIRD_PARTY_PROGRESS_ROUTES) {
+      expect((await send(method, path)).statusCode, `${method} ${path}`).not.toBe(403);
+    }
+  });
+
   it('guards exactly the routes listed here', () => {
     let guarded = 0;
     for (const module of ctx.app.get(ModulesContainer).values()) {
@@ -140,6 +177,99 @@ describe('App Attest enforcement (e2e)', { timeout: TIMEOUT }, () => {
       }
     }
     expect(guarded).toBe(GUARDED_ROUTES.length);
+  });
+
+  it('accepts a registered Android key on a guarded route, once per nonce', async () => {
+    const challenge = (
+      await ctx.app.inject({ method: 'POST', url: '/api/v1/app-attest/challenges', headers: { authorization: `Bearer ${ctx.adminToken}` } })
+    ).json() as {
+      challenge: string;
+    };
+    // A server outside production takes the debug build's software attestation, as the emulator makes it.
+    const chain = androidChain({
+      challenge: Buffer.from(challenge.challenge),
+      packageName: 'app.bookorbit.reader.debug',
+      securityLevel: 0,
+      softwareOnly: true,
+    });
+    const registration = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/v1/app-attest/android-keys',
+      headers: { authorization: `Bearer ${ctx.adminToken}`, 'content-type': 'application/json' },
+      payload: { keyId: chain.keyId, certificateChain: chain.chain.map((der) => der.toString('base64')), challenge: challenge.challenge },
+    });
+    expect(registration.statusCode).toBe(201);
+    expect(registration.json()).toEqual({ keyId: chain.keyId, environment: 'development' });
+
+    const path = '/notebook/overview';
+    const timestamp = String(Date.now());
+    const nonce = randomBytes(16).toString('base64url');
+    const clientData = androidAttestClientData('GET', `/api/v1${path}`, timestamp, appAttestBodySha256(Buffer.alloc(0)), nonce);
+    const headers = {
+      'x-bookorbit-attest-key': chain.keyId,
+      'x-bookorbit-attest-assertion': androidAssertion(clientData, chain.leafKey).toString('base64'),
+      'x-bookorbit-attest-time': timestamp,
+      'x-bookorbit-attest-nonce': nonce,
+    };
+
+    expect((await send('GET', path, headers)).statusCode).toBe(200);
+    const replay = await send('GET', path, headers);
+    expect(replay.statusCode).toBe(403);
+    expect((replay.json() as { errorCode?: string }).errorCode).toBe('APP_ATTEST_INVALID');
+  });
+});
+
+describe('App Attest enforcement outside production (e2e)', { timeout: TIMEOUT }, () => {
+  let ctx: E2EContext;
+
+  beforeAll(async () => {
+    ctx = await createE2EContext({ isolateAppData: true, realAppAttest: true, appAttestNodeEnv: 'development' });
+  });
+
+  afterAll(async () => {
+    await closeE2EContext(ctx);
+  });
+
+  function send(method: string, path: string, body?: object, headers: Record<string, string> = {}) {
+    return ctx.app.inject({
+      method: method as 'GET',
+      url: `/api/v1${path}`,
+      headers: { authorization: `Bearer ${ctx.adminToken}`, ...(body ? { 'content-type': 'application/json' } : {}), ...headers },
+      ...(body ? { payload: body } : {}),
+    });
+  }
+
+  it('accepts an unsigned request on the routes marked for it, and still verifies a signed one', async () => {
+    for (const [method, path, body, status] of UNSIGNED_OUTSIDE_PRODUCTION) {
+      const unsigned = await send(method, path, body);
+      expect({ method, path, status: unsigned.statusCode }).toEqual({ method, path, status });
+      const forged = await send(method, path, body, {
+        'x-bookorbit-attest-key': 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+        'x-bookorbit-attest-assertion': 'AAAA',
+        'x-bookorbit-attest-time': String(Date.now()),
+      });
+      expect(forged.statusCode).toBe(403);
+      expect((forged.json() as { errorCode?: string }).errorCode).toBe('APP_ATTEST_KEY_UNKNOWN');
+    }
+  });
+
+  it('still refuses an unsigned request on every other guarded route', async () => {
+    const marked = new Set(UNSIGNED_OUTSIDE_PRODUCTION.map(([method, path]) => `${method} ${path}`));
+    const failures: string[] = [];
+    for (const [method, path] of GUARDED_ROUTES) {
+      if (marked.has(`${method} ${path}`)) continue;
+      const hasBody = method !== 'GET' && method !== 'DELETE';
+      const response = await ctx.app.inject({
+        method: method as 'GET',
+        url: `/api/v1${path}`,
+        headers: { authorization: `Bearer ${ctx.adminToken}`, ...(hasBody ? { 'content-type': 'application/json' } : {}) },
+        ...(hasBody ? { payload: '{}' } : {}),
+      });
+      const errorCode = (response.json() as { errorCode?: string }).errorCode;
+      if (response.statusCode !== 403 || errorCode !== 'APP_ATTEST_REQUIRED')
+        failures.push(`${method} ${path} -> ${response.statusCode} ${errorCode}`);
+    }
+    expect(failures).toEqual([]);
   });
 });
 

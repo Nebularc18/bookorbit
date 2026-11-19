@@ -26,7 +26,7 @@ describe('WorkService repository boundary', () => {
     findEditionWork: vi.fn<WorkRepository['findEditionWork']>(),
     findUnreadEditions: vi.fn<WorkRepository['findUnreadEditions']>(),
   };
-  const library = { findAccessibleLibraryIds: vi.fn(), findEditableLibraryIds: vi.fn(), verifyUserAccess: vi.fn(), verifyUserAccessLevel: vi.fn() };
+  const library = { findAccessibleLibraryIds: vi.fn(), findEditableLibraryIds: vi.fn(), verifyAccess: vi.fn(), verifyAccessLevel: vi.fn() };
   const book = { verifyBookAccess: vi.fn() };
   const query = { buildWhere: vi.fn() };
 
@@ -79,7 +79,7 @@ describe('WorkService repository boundary', () => {
     expect(repository.findUnreadEditions).not.toHaveBeenCalled();
   });
   it('requires editor access before creating or assigning a work', async () => {
-    library.verifyUserAccessLevel.mockRejectedValue(new ForbiddenException());
+    library.verifyAccessLevel.mockRejectedValue(new ForbiddenException());
     await expect(service.group(dto, user)).rejects.toThrow(ForbiddenException);
     expect(repository.createAndAssign).not.toHaveBeenCalled();
   });
@@ -93,7 +93,7 @@ describe('WorkService repository boundary', () => {
 
   it('creates the group only after verifying the locked editions', async () => {
     await expect(service.group(dto, user)).resolves.toEqual({ id: 9 });
-    expect(library.verifyUserAccessLevel).toHaveBeenCalledWith(7, 3, false, 'editor');
+    expect(library.verifyAccessLevel).toHaveBeenCalledWith(user, 3, 'editor');
     expect(repository.createAndAssign).toHaveBeenCalledWith(7, 'Sample', [1, 2], expect.anything(), undefined);
   });
 
@@ -116,8 +116,8 @@ describe('WorkService repository boundary', () => {
       { id: 2, libraryId: 4, workId: null },
     ]);
     await expect(service.group(dto, user)).resolves.toEqual({ id: 9 });
-    expect(library.verifyUserAccessLevel).toHaveBeenCalledWith(7, 3, false, 'editor');
-    expect(library.verifyUserAccessLevel).toHaveBeenCalledWith(7, 4, false, 'editor');
+    expect(library.verifyAccessLevel).toHaveBeenCalledWith(user, 3, 'editor');
+    expect(library.verifyAccessLevel).toHaveBeenCalledWith(user, 4, 'editor');
     expect(query.buildWhere).toHaveBeenCalledWith(null, { accessibleLibraryIds: [3, 4], userId: 7, contentFilters: user.contentFilters });
   });
 
@@ -143,7 +143,7 @@ describe('WorkService repository boundary', () => {
       { id: 2, libraryId: 3, workId: null },
     ]);
     repository.groupEditions.mockResolvedValue([{ id: 5, libraryId: 4, workId: 9 }]);
-    library.verifyUserAccessLevel.mockImplementation((_userId, libraryId) =>
+    library.verifyAccessLevel.mockImplementation((_user, libraryId) =>
       libraryId === 4 ? Promise.reject(new ForbiddenException()) : Promise.resolve(),
     );
     await expect(service.group(dto, user)).rejects.toThrow(ForbiddenException);

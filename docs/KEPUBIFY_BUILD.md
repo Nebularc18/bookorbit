@@ -1,11 +1,11 @@
 # Bundled kepubify
 
-These six binaries use Go 1.27.3 to include the fix for CVE-2026-111943.
+These six binaries use Go 1.27.4 to include the fix for CVE-2026-97054.
 Source: `pgaskin/kepubify` commit `9546034bc023891af5ce30709de6ae2dcf264628`.
 Keep the default reported version `v4-dev` because it participates in cached
 rendition identities. Compare decompressed conversion output when rebuilding.
 
-From a checkout of that source revision, using Go 1.27.3:
+From a checkout of that source revision, using Go 1.27.4:
 
 ```bash
 go get golang.org/x/text@v0.43.0 golang.org/x/sync@v0.24.0

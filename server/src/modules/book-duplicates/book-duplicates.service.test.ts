@@ -1,5 +1,7 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import { EMPTY_CONTENT_FILTER_RULES } from '@bookorbit/types';
+import { DrizzleQueryError } from 'drizzle-orm';
+import { DatabaseError } from 'pg';
 
 import type { RequestUser } from '../../common/types/request-user';
 import { BookDuplicatesService, otherFormatKeys } from './book-duplicates.service';
@@ -51,6 +53,7 @@ function setup(accessibleLibraryIds = [2]) {
     findGroupKind: vi.fn().mockResolvedValue('duplicate'),
     findOtherFormatBatch: vi.fn().mockResolvedValue([]),
     insertScanKeys: vi.fn().mockResolvedValue(undefined),
+    analyzeScanKeys: vi.fn().mockResolvedValue(undefined),
     createOtherFormatPairs: vi.fn().mockResolvedValue(undefined),
     finalizeOtherFormatGroups: vi.fn().mockResolvedValue(0),
     insertDismissals: vi.fn().mockResolvedValue(undefined),
@@ -62,7 +65,8 @@ function setup(accessibleLibraryIds = [2]) {
     findCandidatePreviews: vi.fn().mockResolvedValue([]),
   };
   const libraryService = { findAccessibleLibraryIds: vi.fn().mockResolvedValue(accessibleLibraryIds) };
-  return { service: new BookDuplicatesService(repo as never, libraryService as never), repo, libraryService };
+  const jobChanges = { notify: vi.fn() };
+  return { service: new BookDuplicatesService(repo as never, libraryService as never, jobChanges as never), repo, libraryService, jobChanges };
 }
 
 describe('BookDuplicatesService', () => {
@@ -205,7 +209,7 @@ describe('BookDuplicatesService', () => {
   });
 
   it('cleans partial artifacts when a background scan fails', async () => {
-    const { service, repo } = setup();
+    const { service, repo, jobChanges } = setup();
     repo.countScopedBooks.mockResolvedValue(10);
     repo.insertFileHashKeys.mockRejectedValue(new Error('database unavailable'));
 
@@ -213,10 +217,136 @@ describe('BookDuplicatesService', () => {
 
     await vi.waitFor(() => expect(repo.deleteScanArtifacts).toHaveBeenCalledWith(11));
     expect(repo.updateScan).toHaveBeenCalledWith(11, expect.objectContaining({ status: 'failed', errorCode: 'scan_failed' }));
+    await vi.waitFor(() => expect(jobChanges.notify).toHaveBeenLastCalledWith({ type: 'duplicate-scan', ownerId: 7, state: true }));
+  });
+
+  it('logs the PostgreSQL reason and SQLSTATE instead of the SQL Drizzle reports', async () => {
+    const { service, repo } = setup();
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      repo.countScopedBooks.mockResolvedValue(10);
+      const timeout = Object.assign(new DatabaseError('canceling statement due to statement timeout', 0, 'error'), { code: '57014' });
+      repo.createOtherFormatPairs.mockRejectedValue(new DrizzleQueryError('WITH matched AS (...)', [11, 11, 0.85], timeout));
+
+      await service.createScan({ libraryId: 2, similarityPercent: 85 }, user);
+
+      await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('duplicate scan failed')));
+      const message = String(warn.mock.calls.at(-1)?.[0]);
+      expect(message).toContain('postgresCode=57014');
+      expect(message).toContain('error="canceling statement due to statement timeout"');
+      expect(message).not.toContain('Failed query:');
+      expect(repo.updateScan).toHaveBeenCalledWith(11, expect.objectContaining({ status: 'failed', errorCode: 'scan_failed' }));
+      expect(repo.deleteScanArtifacts).toHaveBeenCalledWith(11);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    { case: 'a plain error', failure: new Error('database unavailable'), message: 'database unavailable' },
+    {
+      case: 'a Node system error under Drizzle',
+      failure: new DrizzleQueryError('select 1', [], Object.assign(new Error('write EPIPE'), { code: 'EPIPE' })),
+      message: 'write EPIPE',
+    },
+    {
+      case: 'a wrapped error that is not a failed query',
+      failure: new Error('stage failed', { cause: Object.assign(new Error('inner'), { code: '57014' }) }),
+      message: 'stage failed',
+    },
+    { case: 'a non-Error rejection', failure: 'plain failure', message: 'plain failure' },
+  ])('logs no SQLSTATE for $case', async ({ failure, message }) => {
+    const { service, repo } = setup();
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      repo.countScopedBooks.mockResolvedValue(10);
+      repo.createOtherFormatPairs.mockRejectedValue(failure);
+
+      await service.createScan({ libraryId: 2, similarityPercent: 85 }, user);
+
+      await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('duplicate scan failed')));
+      const logged = String(warn.mock.calls.at(-1)?.[0]);
+      expect(logged).toContain('postgresCode=none');
+      expect(logged).toContain(`error="${message}"`);
+      expect(repo.updateScan).toHaveBeenCalledWith(11, expect.objectContaining({ status: 'failed', errorCode: 'scan_failed' }));
+      expect(repo.deleteScanArtifacts).toHaveBeenCalledWith(11);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('scans all accessible libraries when no library is selected', async () => {
+    const { service, repo } = setup([2, 3]);
+    repo.countScopedBooks.mockResolvedValue(2);
+    repo.findScan.mockResolvedValue(scanRow({ libraryIds: [2, 3], requestedLibraryId: null }));
+    repo.createScanUnlessActive.mockResolvedValue(scanRow({ libraryIds: [2, 3], requestedLibraryId: null }));
+
+    await service.createScan({ similarityPercent: 85 }, user);
+
+    await vi.waitFor(() => expect(repo.updateScan).toHaveBeenCalledWith(11, expect.objectContaining({ status: 'completed' })));
+    expect(repo.createScanUnlessActive).toHaveBeenCalledWith({
+      userId: 7,
+      libraryIds: [2, 3],
+      requestedLibraryId: null,
+      similarityPercent: 85,
+    });
+    expect(repo.insertFileHashKeys).toHaveBeenCalledWith(11, [2, 3], user);
+    expect(repo.findIsbnBatch).toHaveBeenCalledWith([2, 3], user, 0, 500);
+    expect(repo.findOtherFormatBatch).toHaveBeenCalledWith([2, 3], user, 0, 500);
+    expect(repo.createOtherFormatPairs).toHaveBeenCalledWith(11, 85);
+  });
+
+  it('analyzes populated cross-format keys before running the indexed matching query', async () => {
+    const { service, repo } = setup();
+    repo.countScopedBooks.mockResolvedValue(2);
+    repo.findOtherFormatBatch
+      .mockResolvedValueOnce([
+        {
+          id: 4,
+          title: 'Dune',
+          hardcover_id: '123',
+          open_library_id: null,
+          series_id: null,
+          series_index: null,
+          formats: ['epub'],
+          authors: ['Frank Herbert'],
+          narrators: [],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await service.createScan({ libraryId: 2, similarityPercent: 85 }, user);
+
+    await vi.waitFor(() => expect(repo.updateScan).toHaveBeenCalledWith(11, expect.objectContaining({ status: 'completed' })));
+    expect(repo.insertScanKeys).toHaveBeenCalledTimes(1);
+    expect(repo.analyzeScanKeys).toHaveBeenCalledTimes(1);
+    expect(repo.insertScanKeys.mock.invocationCallOrder[0]).toBeLessThan(repo.analyzeScanKeys.mock.invocationCallOrder[0]!);
+    expect(repo.analyzeScanKeys.mock.invocationCallOrder[0]).toBeLessThan(repo.createOtherFormatPairs.mock.invocationCallOrder[0]!);
+  });
+
+  it('still matches and completes the scan when refreshing statistics fails', async () => {
+    const { service, repo } = setup();
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      repo.countScopedBooks.mockResolvedValue(2);
+      const lockTimeout = Object.assign(new DatabaseError('canceling statement due to lock timeout', 0, 'error'), { code: '55P03' });
+      repo.analyzeScanKeys.mockRejectedValue(new DrizzleQueryError('ANALYZE "book_duplicate_scan_keys"', [], lockTimeout));
+
+      await service.createScan({ libraryId: 2, similarityPercent: 85 }, user);
+
+      await vi.waitFor(() => expect(repo.updateScan).toHaveBeenCalledWith(11, expect.objectContaining({ status: 'completed' })));
+      expect(repo.createOtherFormatPairs).toHaveBeenCalledWith(11, 85);
+      expect(repo.deleteScanArtifacts).not.toHaveBeenCalled();
+      const logged = String(warn.mock.calls.find(([line]) => String(line).includes('[book_duplicates.scan_keys_analyze] [fail]'))?.[0]);
+      expect(logged).toContain('postgresCode=55P03');
+      expect(logged).toContain('error="canceling statement due to lock timeout"');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('runs every bounded scan stage and completes a non-empty library', async () => {
-    const { service, repo } = setup();
+    const { service, repo, jobChanges } = setup();
     repo.countScopedBooks.mockResolvedValue(2);
     repo.findIsbnBatch.mockResolvedValueOnce([{ id: 3, isbn10: '0306406152', isbn13: null, formats: ['epub', 'EPUB'] }]).mockResolvedValueOnce([]);
     repo.finalizeGroups.mockResolvedValue(1);
@@ -233,6 +363,11 @@ describe('BookDuplicatesService', () => {
     expect(repo.deleteDismissedPairs).toHaveBeenCalledWith(11, 7);
     expect(repo.updateScan).toHaveBeenCalledWith(11, expect.objectContaining({ status: 'completed', totalExtraCopies: 0, totalReclaimableBytes: 0 }));
     expect(repo.deleteScanKeys).toHaveBeenCalledWith(11);
+    // The Jobs area hears the request, the start, every stage as progress only, and the end.
+    await vi.waitFor(() => expect(jobChanges.notify).toHaveBeenLastCalledWith({ type: 'duplicate-scan', ownerId: 7, state: true }));
+    const calls = jobChanges.notify.mock.calls.map(([change]) => (change as { state: boolean }).state);
+    expect(calls.slice(0, 2)).toEqual([true, true]);
+    expect(calls.filter((state) => !state)).toHaveLength(7);
   });
 
   it('rejects completed results when the saved library scope is no longer accessible', async () => {
