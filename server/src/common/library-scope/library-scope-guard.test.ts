@@ -20,6 +20,7 @@ const ALLOWED: Record<string, string> = {
   'modules/book-merge/book-merge.repository.ts': 'fan-out: which readers a merge affects',
   'modules/achievement/achievement.repository.ts': 'account-level achievement evaluation, which runs for the account, not a request',
   'scripts/seed-apple-source-stats.ts': 'development seed script',
+  'scripts/seed-household-poc.ts': 'writes fixture grants in a local prototype database',
 };
 
 const GRANT_READ = /\buserLibraryAccess\b|\buser_library_access\b|\bfindAccessibleIdsForUser\b|\bhasUserAccess\b|\bfindUserAccessLevel\b/;
