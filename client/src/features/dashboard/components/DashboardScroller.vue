@@ -12,6 +12,7 @@ import DeleteBookDialog from '@/features/book/components/DeleteBookDialog.vue'
 import { useDashboardScroller } from '../composables/useDashboardScroller'
 import { useDeleteBook } from '@/features/book/composables/useDeleteBook'
 import { cardMediaView } from '@/features/book/lib/card-media'
+import type { BookOpenMode } from '@/features/book/composables/useBookReaderChoice'
 import { MIN_SHELF_ROWS, chunkIntoBands, effectiveShelfRows, shelfBookLimit } from '../lib/shelf-rows'
 
 defineOptions({
@@ -65,6 +66,11 @@ const skeletonBands = computed(() => Array.from({ length: shelfRows.value }, () 
 const PORTRAIT_COVER_WIDTH_CLASS = 'w-[120px]'
 const SQUARE_COVER_WIDTH_CLASS = 'w-[150px]'
 const shelfMediaKind = computed<ConcreteBookMediaKind | null>(() => (props.type === 'continue-listening' ? 'audiobook' : null))
+const shelfOpenMode = computed<BookOpenMode>(() => {
+  if (props.type === 'continue-reading') return 'read'
+  if (props.type === 'continue-listening') return 'listen'
+  return 'auto'
+})
 
 // 'move-to-library' is part of the shared card contract; this view does not
 // opt in, so it never fires here.
@@ -197,6 +203,7 @@ function coverAnimationDelay(index: number): string {
               :book="book"
               :cover-aspect-ratio="shelfCoverAspectRatio(book)"
               :media-kind="shelfMediaKind"
+              :quick-open="shelfOpenMode"
               @action="handleBookAction(book, $event)"
             />
           </div>
