@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useBookReaderChoice } from '@/features/book/composables/useBookReaderChoice'
+import { useBookReaderChoice, type BookOpenMode } from '@/features/book/composables/useBookReaderChoice'
 import BookReaderChoiceDialog from '@/features/book/components/BookReaderChoiceDialog.vue'
 import type { BookCard, BookFileRef, ConcreteBookMediaKind, CoverAspectRatio } from '@bookorbit/types'
 import { getBookMediaKind, getBookMediaProfile, isAudioFormat, READER_OPENABLE_FORMATS } from '@bookorbit/types'
@@ -69,7 +69,10 @@ const {
   openBook: chooseReader,
   openFile: openReaderChoice,
   closeChoice: closeReaderChoice,
-} = useBookReaderChoice(() => props.book)
+} = useBookReaderChoice(
+  () => props.book,
+  () => props.quickOpen ?? 'auto',
+)
 
 const router = useRouter()
 
@@ -83,6 +86,7 @@ const props = defineProps<{
   allowMoveToLibrary?: boolean
   /** The medium the surrounding grid shows, such as a series' Audiobooks group. */
   mediaKind?: ConcreteBookMediaKind | null
+  quickOpen?: BookOpenMode
 }>()
 
 type BookActionType = 'quick-view' | 'add-to-collection' | 'move-to-library' | 'delete'
@@ -301,24 +305,26 @@ function handleSecondaryLabelClick(event: MouseEvent) {
   handleLabelClick(gridCardSecondaryLabel.value, event)
 }
 
-const isPrimaryClickAvailable = computed(() => thumbnailClickAction.value === 'details' || (primaryFile.value != null && !isMissing.value))
-const showPrimaryOverlayAction = computed(() => thumbnailClickAction.value === 'details' || (primaryFile.value != null && !isMissing.value))
+const canOpenFromCard = computed(() => !isMissing.value && (props.quickOpen ? readerChoices.value.length > 0 : primaryFile.value != null))
+const openDetailsOnClick = computed(() => (props.quickOpen ? !canOpenFromCard.value : thumbnailClickAction.value === 'details'))
+const isPrimaryClickAvailable = computed(() => openDetailsOnClick.value || canOpenFromCard.value)
+const usePlayAction = computed(() => props.quickOpen === 'listen' || (props.quickOpen !== 'read' && isAudiobook.value))
 const primaryOverlayActionIcon = computed(() => {
-  if (thumbnailClickAction.value === 'details') return BookText
-  return isAudiobook.value ? Play : BookOpen
+  if (openDetailsOnClick.value) return BookText
+  return usePlayAction.value ? Play : BookOpen
 })
-const primaryOverlayActionIconClass = computed(() => (thumbnailClickAction.value !== 'details' && isAudiobook.value ? 'ml-[2cqi]' : ''))
-const showExplicitReadButton = computed(() => thumbnailClickAction.value === 'details' && primaryFile.value != null && !isMissing.value)
+const primaryOverlayActionIconClass = computed(() => (!openDetailsOnClick.value && usePlayAction.value ? 'ml-[2cqi]' : ''))
+const showExplicitReadButton = computed(() => openDetailsOnClick.value && canOpenFromCard.value)
 const readActionLabel = computed(() => {
-  if (isAudiobook.value) {
-    return hasProgress.value ? t('book.actions.continueListening') : t('book.actions.startListening')
+  if (usePlayAction.value) {
+    return hasProgress.value || props.quickOpen === 'listen' ? t('book.actions.continueListening') : t('book.actions.startListening')
   }
-  return hasProgress.value ? t('book.actions.continueReading') : t('book.actions.startReading')
+  return hasProgress.value || props.quickOpen === 'read' ? t('book.actions.continueReading') : t('book.actions.startReading')
 })
-const primaryOverlayActionLabel = computed(() => (thumbnailClickAction.value === 'details' ? t('book.actions.bookDetails') : readActionLabel.value))
+const primaryOverlayActionLabel = computed(() => (openDetailsOnClick.value ? t('book.actions.bookDetails') : readActionLabel.value))
 
 function handlePrimaryOverlayAction() {
-  if (thumbnailClickAction.value === 'details') {
+  if (openDetailsOnClick.value) {
     openBookDetails()
     return
   }
@@ -327,8 +333,8 @@ function handlePrimaryOverlayAction() {
 }
 
 function openPrimaryFileExplicit() {
-  if (isMissing.value) return
-  if (props.mediaKind && primaryFile.value) {
+  if (!canOpenFromCard.value) return
+  if (!props.quickOpen && props.mediaKind && primaryFile.value) {
     openReaderChoice(primaryFile.value)
     return
   }
@@ -343,17 +349,12 @@ function handleCardClick(event: MouseEvent) {
     return
   }
 
-  if (thumbnailClickAction.value === 'details') {
-    openBookDetails()
-    return
-  }
-
-  if (isTouch.value) {
+  if (!props.quickOpen && !openDetailsOnClick.value && isTouch.value) {
     showMobileOverlay.value = !showMobileOverlay.value
     return
   }
 
-  openPrimaryFileExplicit()
+  handlePrimaryOverlayAction()
 }
 
 function handleClickOutside(event: MouseEvent) {
@@ -598,7 +599,9 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
             class="absolute inset-0 flex flex-col p-2 transition-opacity duration-150"
             :class="[
               overlayBackground,
-              showMobileOverlay ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto',
+              showMobileOverlay
+                ? 'opacity-100'
+                : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
             ]"
           >
             <!-- Top row: Quick View + explicit Read (when thumbnail click prefers details) -->
@@ -631,12 +634,12 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
 
             <!-- Center: primary thumbnail action -->
             <div class="flex-1 flex items-center justify-center">
-              <Tooltip v-if="showPrimaryOverlayAction">
+              <Tooltip v-if="isPrimaryClickAvailable">
                 <TooltipTrigger as-child>
                   <button
                     data-testid="grid-card-primary-action"
                     class="size-[30cqi] flex items-center justify-center rounded-full bg-primary text-white shadow-2xl transition-all duration-300 scale-75 hover:scale-110 active:scale-90"
-                    :class="[showMobileOverlay || 'group-hover:scale-100', showMobileOverlay ? 'scale-100' : '']"
+                    :class="showMobileOverlay ? 'scale-100' : 'group-hover:scale-100 focus-visible:scale-100'"
                     :aria-label="primaryOverlayActionLabel"
                     @click.stop="handlePrimaryOverlayAction"
                   >
@@ -663,134 +666,142 @@ const secondaryLabelText = computed(() => resolveBookLabel(gridCardSecondaryLabe
                 </button>
               </div>
             </div>
+          </div>
 
-            <!-- Kebab menu anchored to lower-right (not in below-cover mode, where it lives in the label row) -->
-            <div v-if="!showBelowCoverLabelArea" class="absolute bottom-2 right-2 z-20">
-              <DropdownMenu>
-                <DropdownMenuTrigger as-child>
-                  <button class="px-0.75 py-1.5 rounded-md bg-black/40 hover:bg-white/30 transition-colors text-white shrink-0">
-                    <MoreVertical class="size-3.5" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem v-if="openableFiles.length <= 1 && primaryFile && !isMissing" @click="openFile(primaryFile)">
+          <!-- Kebab menu anchored to lower-right (not in below-cover mode, where it lives in the label row) -->
+          <div
+            v-if="!selectionMode && !showBelowCoverLabelArea"
+            class="absolute bottom-2 right-2 z-20 transition-opacity duration-150"
+            :class="
+              showMobileOverlay || (quickOpen && isTouch)
+                ? 'opacity-100'
+                : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto'
+            "
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <button class="px-0.75 py-1.5 rounded-md bg-black/40 hover:bg-white/30 transition-colors text-white shrink-0">
+                  <MoreVertical class="size-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem v-if="openableFiles.length <= 1 && primaryFile && !isMissing" @click="openFile(primaryFile)">
+                  <BookOpen class="size-4 mr-2" />
+                  {{ t('book.actions.read') }}
+                </DropdownMenuItem>
+                <DropdownMenuSub v-else-if="openableFiles.length > 1 && !isMissing">
+                  <DropdownMenuSubTrigger>
                     <BookOpen class="size-4 mr-2" />
                     {{ t('book.actions.read') }}
-                  </DropdownMenuItem>
-                  <DropdownMenuSub v-else-if="openableFiles.length > 1 && !isMissing">
-                    <DropdownMenuSubTrigger>
-                      <BookOpen class="size-4 mr-2" />
-                      {{ t('book.actions.read') }}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent>
-                      <DropdownMenuItem v-for="file in openableFiles" :key="file.id" @click="openFile(file)">
-                        <span v-if="isMultiTrackAudio && isAudioFile(file)">{{ t('book.file.audiobook') }}</span>
-                        <span v-else>{{ fileFormatName(file) }}</span>
-                        <span v-if="file.role === 'primary' && !isMultiTrackAudio" class="ml-auto pl-4 text-[10px] text-primary">{{
-                          t('book.file.primary')
-                        }}</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  <DropdownMenuItem v-if="primaryFile && !isMissing" @click="peekPrimaryFile">
-                    <Eye class="size-4 mr-2" />
-                    {{ t('book.actions.peek') }}
-                  </DropdownMenuItem>
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem v-for="file in openableFiles" :key="file.id" @click="openFile(file)">
+                      <span v-if="isMultiTrackAudio && isAudioFile(file)">{{ t('book.file.audiobook') }}</span>
+                      <span v-else>{{ fileFormatName(file) }}</span>
+                      <span v-if="file.role === 'primary' && !isMultiTrackAudio" class="ml-auto pl-4 text-[10px] text-primary">{{
+                        t('book.file.primary')
+                      }}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuItem v-if="primaryFile && !isMissing" @click="peekPrimaryFile">
+                  <Eye class="size-4 mr-2" />
+                  {{ t('book.actions.peek') }}
+                </DropdownMenuItem>
 
-                  <!-- Download submenu -->
-                  <DropdownMenuItem
-                    v-if="hasPermission('library_download') && downloadableFiles.length === 1 && primaryDownloadFile"
-                    @click="handleDownloadFile(primaryDownloadFile)"
-                  >
+                <!-- Download submenu -->
+                <DropdownMenuItem
+                  v-if="hasPermission('library_download') && downloadableFiles.length === 1 && primaryDownloadFile"
+                  @click="handleDownloadFile(primaryDownloadFile)"
+                >
+                  <Download class="size-4 mr-2" />
+                  {{ t('book.actions.download') }}
+                </DropdownMenuItem>
+                <DropdownMenuSub v-else-if="hasPermission('library_download') && downloadableFiles.length > 1">
+                  <DropdownMenuSubTrigger>
                     <Download class="size-4 mr-2" />
                     {{ t('book.actions.download') }}
-                  </DropdownMenuItem>
-                  <DropdownMenuSub v-else-if="hasPermission('library_download') && downloadableFiles.length > 1">
-                    <DropdownMenuSubTrigger>
-                      <Download class="size-4 mr-2" />
-                      {{ t('book.actions.download') }}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent>
-                      <DropdownMenuItem v-for="file in downloadableFiles" :key="file.id" @click="handleDownloadFile(file)">
-                        <span v-if="isMultiTrackAudio && isAudioFile(file)">{{ t('book.download.audiobookZip') }}</span>
-                        <span v-else>{{ fileFormatName(file) }}</span>
-                        <span v-if="file.role === 'primary' && !isMultiTrackAudio" class="ml-auto pl-4 text-[10px] text-primary">{{
-                          t('book.file.primary')
-                        }}</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem @click="handleExportAll"> {{ t('book.download.allFormatsZip') }} </DropdownMenuItem>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem v-for="file in downloadableFiles" :key="file.id" @click="handleDownloadFile(file)">
+                      <span v-if="isMultiTrackAudio && isAudioFile(file)">{{ t('book.download.audiobookZip') }}</span>
+                      <span v-else>{{ fileFormatName(file) }}</span>
+                      <span v-if="file.role === 'primary' && !isMultiTrackAudio" class="ml-auto pl-4 text-[10px] text-primary">{{
+                        t('book.file.primary')
+                      }}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem @click="handleExportAll"> {{ t('book.download.allFormatsZip') }} </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
 
-                  <DropdownMenuItem @click="openBookDetails">
-                    <BookText class="size-4 mr-2" />
-                    {{ t('book.actions.bookDetails') }}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator v-if="canEditMetadata" />
-                  <DropdownMenuSub v-if="canEditMetadata">
-                    <DropdownMenuSubTrigger>
+                <DropdownMenuItem @click="openBookDetails">
+                  <BookText class="size-4 mr-2" />
+                  {{ t('book.actions.bookDetails') }}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator v-if="canEditMetadata" />
+                <DropdownMenuSub v-if="canEditMetadata">
+                  <DropdownMenuSubTrigger>
+                    <Pencil class="size-4 mr-2" />
+                    {{ t('book.actions.metadata') }}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem @click="router.push({ name: 'book-detail', params: { bookId: book.id }, query: { tab: 'edit' } })">
                       <Pencil class="size-4 mr-2" />
-                      {{ t('book.actions.metadata') }}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent>
-                      <DropdownMenuItem @click="router.push({ name: 'book-detail', params: { bookId: book.id }, query: { tab: 'edit' } })">
-                        <Pencil class="size-4 mr-2" />
-                        {{ t('book.actions.editMetadata') }}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem :disabled="anyRefreshing" @click="handleRefreshMetadata">
-                        <Loader2 v-if="anyRefreshing" class="size-4 mr-2 animate-spin" />
-                        <RefreshCw v-else class="size-4 mr-2" />
-                        {{ t('book.actions.refreshMetadata') }}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem :disabled="reExtractingCover" @click="reExtractCover">
-                        <Loader2 v-if="reExtractingCover" class="size-4 mr-2 animate-spin" />
-                        <Image v-else class="size-4 mr-2" />
-                        {{ t('book.actions.regenerateCover') }}
-                      </DropdownMenuItem>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  <DropdownMenuItem @click="emit('action', 'add-to-collection')">
-                    <FolderPlus class="size-4 mr-2" />
-                    {{ t('book.actions.addToCollection') }}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem v-if="allowMoveToLibrary && canEditMetadata" @click="emit('action', 'move-to-library')">
-                    <FolderInput class="size-4 mr-2" />
-                    {{ t('book.move.action') }}
-                  </DropdownMenuItem>
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <component
-                        :is="STATUS_ICONS[localReadStatus ?? 'unread']"
-                        class="size-4 mr-2"
-                        :class="STATUS_COLORS[localReadStatus ?? 'unread']"
-                      />
-                      {{ t('book.actions.setStatus') }}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent>
-                      <DropdownMenuItem v-for="opt in STATUS_OPTIONS" :key="opt.value" @click="handleSetStatus(opt.value)">
-                        <component :is="STATUS_ICONS[opt.value]" class="size-4 mr-2" :class="STATUS_COLORS[opt.value]" />
-                        {{ opt.label }}
-                        <Check v-if="localReadStatus === opt.value" class="size-3 ml-auto text-primary" />
-                      </DropdownMenuItem>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  <DropdownMenuItem v-if="hasPermission('email_send')" @click="showSendDialog = true">
-                    <Send class="size-4 mr-2" />
-                    {{ t('book.actions.sendViaEmail') }}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator v-if="hasPermission('email_send') || hasPermission('library_delete_books')" />
-                  <DropdownMenuItem
-                    v-if="hasPermission('library_delete_books')"
-                    class="text-destructive focus:text-destructive"
-                    @click="emit('action', 'delete')"
-                  >
-                    <Trash2 class="size-4 mr-2" />
-                    {{ t('common.delete') }}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                      {{ t('book.actions.editMetadata') }}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem :disabled="anyRefreshing" @click="handleRefreshMetadata">
+                      <Loader2 v-if="anyRefreshing" class="size-4 mr-2 animate-spin" />
+                      <RefreshCw v-else class="size-4 mr-2" />
+                      {{ t('book.actions.refreshMetadata') }}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem :disabled="reExtractingCover" @click="reExtractCover">
+                      <Loader2 v-if="reExtractingCover" class="size-4 mr-2 animate-spin" />
+                      <Image v-else class="size-4 mr-2" />
+                      {{ t('book.actions.regenerateCover') }}
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuItem @click="emit('action', 'add-to-collection')">
+                  <FolderPlus class="size-4 mr-2" />
+                  {{ t('book.actions.addToCollection') }}
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="allowMoveToLibrary && canEditMetadata" @click="emit('action', 'move-to-library')">
+                  <FolderInput class="size-4 mr-2" />
+                  {{ t('book.move.action') }}
+                </DropdownMenuItem>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <component
+                      :is="STATUS_ICONS[localReadStatus ?? 'unread']"
+                      class="size-4 mr-2"
+                      :class="STATUS_COLORS[localReadStatus ?? 'unread']"
+                    />
+                    {{ t('book.actions.setStatus') }}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem v-for="opt in STATUS_OPTIONS" :key="opt.value" @click="handleSetStatus(opt.value)">
+                      <component :is="STATUS_ICONS[opt.value]" class="size-4 mr-2" :class="STATUS_COLORS[opt.value]" />
+                      {{ opt.label }}
+                      <Check v-if="localReadStatus === opt.value" class="size-3 ml-auto text-primary" />
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuItem v-if="hasPermission('email_send')" @click="showSendDialog = true">
+                  <Send class="size-4 mr-2" />
+                  {{ t('book.actions.sendViaEmail') }}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator v-if="hasPermission('email_send') || hasPermission('library_delete_books')" />
+                <DropdownMenuItem
+                  v-if="hasPermission('library_delete_books')"
+                  class="text-destructive focus:text-destructive"
+                  @click="emit('action', 'delete')"
+                >
+                  <Trash2 class="size-4 mr-2" />
+                  {{ t('common.delete') }}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </BookCoverSurface>

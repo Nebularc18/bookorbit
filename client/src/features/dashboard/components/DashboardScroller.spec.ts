@@ -36,7 +36,7 @@ const deleteMocks = vi.hoisted(() => ({
 vi.mock('@/features/book/components/BookCoverCard.vue', () => ({
   default: {
     name: 'BookCoverCard',
-    props: ['book', 'coverAspectRatio', 'mediaKind'],
+    props: ['book', 'coverAspectRatio', 'mediaKind', 'quickOpen'],
     emits: ['action'],
     template: `
       <div class="book-card" :data-aspect="coverAspectRatio" :data-media-kind="mediaKind || ''">
@@ -195,6 +195,16 @@ describe('DashboardScroller', () => {
 
     expect(wrapper.findAll('.animate-pulse')).toHaveLength(8)
     expect(wrapper.text()).not.toContain('No audiobooks in progress yet')
+  })
+
+  it.each([
+    ['continue-reading', 'read'],
+    ['continue-listening', 'listen'],
+    ['recently-added', 'auto'],
+  ] as const)('gives cards in %s the %s quick-open mode', (type, mode) => {
+    const wrapper = mountScroller({ type, books: [makeBook(1, 'epub')] })
+
+    expect(wrapper.getComponent({ name: 'BookCoverCard' }).props('quickOpen')).toBe(mode)
   })
 
   it('renders an error state and retries', async () => {

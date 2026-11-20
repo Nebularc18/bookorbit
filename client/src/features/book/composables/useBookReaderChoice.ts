@@ -1,8 +1,11 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { READER_OPENABLE_FORMATS, type AudiobookPlaybackState, type BookFileRef } from '@bookorbit/types'
+import { isAudioFormat, READER_OPENABLE_FORMATS, type AudiobookPlaybackState, type BookFileRef } from '@bookorbit/types'
 import { api } from '@/lib/api'
 import { bookFormatEntries } from '../lib/book-formats'
+import { hasReadAlong } from '../lib/file-capabilities'
+
+export type BookOpenMode = 'auto' | 'read' | 'listen'
 
 interface ReaderBook {
   id: number
@@ -17,11 +20,12 @@ interface SavedPosition {
   cfi?: string | null
   pageNumber?: number | null
   positionSeconds?: number | null
+  mediaOverlayFragment?: string | null
   koboLocationValue?: string | null
   koreaderProgress?: string | null
 }
 
-export function useBookReaderChoice(book: () => ReaderBook) {
+export function useBookReaderChoice(book: () => ReaderBook, mode: () => BookOpenMode = () => 'auto') {
   const router = useRouter()
   const choosing = ref(false)
   const resolving = ref(false)
@@ -29,7 +33,13 @@ export function useBookReaderChoice(book: () => ReaderBook) {
   const choices = computed(() =>
     entries.value
       .flatMap((entry) => (entry.audio ? entry.files.slice(0, 1) : entry.files))
-      .filter((file) => READER_OPENABLE_FORMATS.has(file.format?.toLowerCase() ?? '')),
+      .filter((file) => {
+        const format = file.format?.toLowerCase() ?? ''
+        if (!READER_OPENABLE_FORMATS.has(format)) return false
+        if (mode() === 'read') return !isAudioFormat(format)
+        if (mode() === 'listen') return isAudioFormat(format) || hasReadAlong(file)
+        return true
+      }),
   )
 
   function openFile(file: BookFileRef) {
@@ -51,28 +61,35 @@ export function useBookReaderChoice(book: () => ReaderBook) {
 
     resolving.value = true
     const bookId = book().id
+    const openMode = mode()
+    const audioFile = choices.value.find((file) => isAudioFormat(file.format ?? ''))
     try {
       const [textResponse, audioResponse] = await Promise.all([
         api(`/api/v1/books/${bookId}/progress`),
-        entries.value.some((entry) => entry.audio) ? api(`/api/v1/audiobooks/${bookId}/playback-state`) : Promise.resolve(null),
+        audioFile ? api(`/api/v1/audiobooks/${bookId}/playback-state`) : Promise.resolve(null),
       ])
       const positions: SavedPosition[] = textResponse.ok ? await textResponse.json() : []
       const audio: AudiobookPlaybackState | null = audioResponse?.ok ? await audioResponse.json() : null
-      const audioFile = entries.value.find((entry) => entry.audio)?.files[0]
       if (audio && audioFile && (audio.percentage > 0 || audio.positionMs > 0)) {
         positions.push({ fileId: audioFile.id, percentage: audio.percentage, positionSeconds: audio.positionMs / 1000, updatedAt: audio.capturedAt })
       }
-      if (book().id !== bookId) return
+      if (book().id !== bookId || mode() !== openMode) return
       const recent = positions
-        .filter(
-          (position) =>
+        .filter((position) => {
+          if (openMode === 'listen') {
+            return (
+              (position.fileId === audioFile?.id && position.percentage > 0) || (position.positionSeconds ?? 0) > 0 || !!position.mediaOverlayFragment
+            )
+          }
+          return (
             position.percentage > 0 ||
             !!position.cfi ||
-            (position.pageNumber ?? 0) > 0 ||
-            (position.positionSeconds ?? 0) > 0 ||
+            position.pageNumber != null ||
             !!position.koboLocationValue ||
-            !!position.koreaderProgress,
-        )
+            !!position.koreaderProgress ||
+            (openMode === 'auto' && ((position.positionSeconds ?? 0) > 0 || !!position.mediaOverlayFragment))
+          )
+        })
         .sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0))
       for (const position of recent) {
         const entry = entries.value.find((item) => item.files.some((file) => file.id === position.fileId))
@@ -84,7 +101,7 @@ export function useBookReaderChoice(book: () => ReaderBook) {
       }
       choosing.value = true
     } catch {
-      if (book().id === bookId) choosing.value = true
+      if (book().id === bookId && mode() === openMode) choosing.value = true
     } finally {
       resolving.value = false
     }

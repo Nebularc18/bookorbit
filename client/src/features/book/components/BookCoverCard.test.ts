@@ -4,6 +4,7 @@ import { defineComponent, h, ref } from 'vue'
 import type { BookCard, ConcreteBookMediaKind, CoverAspectRatio } from '@bookorbit/types'
 import BookCoverCard from './BookCoverCard.vue'
 import BookReaderChoiceDialog from './BookReaderChoiceDialog.vue'
+import type { BookOpenMode } from '../composables/useBookReaderChoice'
 
 // -- module mocks (must precede imports) -------------------------------------
 
@@ -199,6 +200,7 @@ function mountCard(
     selected: boolean
     showLabel: boolean
     mediaKind: ConcreteBookMediaKind
+    quickOpen: BookOpenMode
     coverAspectRatio: CoverAspectRatio
     onSelect: (e: MouseEvent) => void
   }> = {},
@@ -376,6 +378,31 @@ describe('BookCoverCard', () => {
 
       expect(mockRouterPush).toHaveBeenCalledWith({ name: 'book-detail', params: { bookId: 42 } })
       expect(mockRouterPush).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'reader' }))
+    })
+
+    it('opens the audiobook directly from a dashboard cover tap despite the details preference', async () => {
+      setTouchMode(true)
+      mockThumbnailClickAction.value = 'details'
+      const files = [makeFile({ id: 10, format: 'epub', role: 'primary' }), makeFile({ id: 11, format: 'm4b', role: 'content' })]
+      const wrapper = mountCard({ book: makeBook({ files }), mediaKind: 'audiobook', quickOpen: 'listen' })
+
+      expect(wrapper.get('[data-testid="grid-card-primary-action"]').attributes('aria-label')).toBe('Continue listening')
+      await wrapper.find('.group').trigger('click')
+
+      expect(mockRouterPush).toHaveBeenCalledExactlyOnceWith({ name: 'reader', params: { bookId: 1, fileId: 11 }, query: { format: 'm4b' } })
+    })
+
+    it('offers available versions from the dashboard primary action instead of opening details', async () => {
+      mockThumbnailClickAction.value = 'details'
+      const files = [makeFile({ id: 10, format: 'epub', role: 'primary' }), makeFile({ id: 11, format: 'm4b', role: 'content' })]
+      const wrapper = mountCard({ book: makeBook({ files }), quickOpen: 'auto' })
+
+      await wrapper.get('[data-testid="grid-card-primary-action"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.getComponent(BookReaderChoiceDialog).props('files')).toEqual(files)
+      expect(mockRouterPush).not.toHaveBeenCalled()
+      wrapper.unmount()
     })
 
     it('opens book details for missing books when thumbnail clicks prefer details', async () => {

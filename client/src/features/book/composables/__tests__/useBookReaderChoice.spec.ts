@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useBookReaderChoice } from '../useBookReaderChoice'
+import { useBookReaderChoice, type BookOpenMode } from '../useBookReaderChoice'
 import type { BookFileRef } from '@bookorbit/types'
 import type { RouteLocationRaw } from 'vue-router'
 
@@ -13,9 +13,13 @@ vi.mock('@/lib/api', () => ({ api }))
 const epub: BookFileRef = { id: 1, format: 'epub', role: 'primary', sizeBytes: 100 }
 const audio: BookFileRef = { id: 2, format: 'm4b', role: 'content', sizeBytes: 1000 }
 const track: BookFileRef = { ...audio, id: 3 }
+const readAlong: BookFileRef = { ...epub, id: 4, mediaOverlay: { available: true, durationSeconds: 600 } }
 
-function setup(files = [epub, audio]) {
-  return useBookReaderChoice(() => ({ id: 10, status: 'available', files }))
+function setup(files = [epub, audio], mode: BookOpenMode = 'auto') {
+  return useBookReaderChoice(
+    () => ({ id: 10, status: 'available', files }),
+    () => mode,
+  )
 }
 
 function respond(text: unknown = [], audioProgress: unknown = null) {
@@ -65,6 +69,43 @@ describe('useBookReaderChoice', () => {
     const choice = setup([epub, audio, track])
     expect(choice.choices.value.map((file) => file.id)).toEqual([1, 2])
     await choice.openBook()
+    expect(push).toHaveBeenCalledWith(expect.objectContaining({ params: { bookId: 10, fileId: 2 } }))
+  })
+
+  it('resumes a reading version on Continue Reading, ignoring newer audio progress', async () => {
+    const pdf: BookFileRef = { ...epub, id: 5, format: 'pdf' }
+    respond([
+      { fileId: 5, pageNumber: 0, updatedAt: '2026-10-01' },
+      { fileId: 2, percentage: 50, updatedAt: '2026-10-02' },
+    ])
+    await setup([epub, audio, pdf], 'read').openBook()
+
+    expect(api).toHaveBeenCalledExactlyOnceWith('/api/v1/books/10/progress')
+    expect(push).toHaveBeenCalledWith(expect.objectContaining({ params: { bookId: 10, fileId: 5 } }))
+  })
+
+  it('opens the only audio edition directly on Continue Listening', async () => {
+    const choice = setup([epub, audio, track], 'listen')
+    await choice.openBook()
+
+    expect(choice.choosing.value).toBe(false)
+    expect(api).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledWith(expect.objectContaining({ params: { bookId: 10, fileId: 2 } }))
+  })
+
+  it('resumes saved read-along narration on Continue Listening', async () => {
+    respond([{ fileId: 4, mediaOverlayFragment: 'chapter.xhtml#start', updatedAt: '2026-10-02' }])
+    const choice = setup([epub, audio, readAlong], 'listen')
+    await choice.openBook()
+
+    expect(choice.choosing.value).toBe(false)
+    expect(push).toHaveBeenCalledWith(expect.objectContaining({ params: { bookId: 10, fileId: 4 } }))
+  })
+
+  it('does not confuse reading a read-along with listening to it', async () => {
+    respond([{ fileId: 4, percentage: 50, updatedAt: '2026-10-02' }], { percentage: 25, positionMs: 50000, capturedAt: '2026-10-01' })
+    await setup([epub, audio, readAlong], 'listen').openBook()
+
     expect(push).toHaveBeenCalledWith(expect.objectContaining({ params: { bookId: 10, fileId: 2 } }))
   })
 
