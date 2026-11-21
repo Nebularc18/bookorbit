@@ -112,6 +112,7 @@ import { UserBookStatusService, type AutoReadingActivity } from '../user-book-st
 import {
   ACHIEVEMENT_EVENT_BOOK_HARDCOVER_EDITION_CHANGED,
   ACHIEVEMENT_EVENT_BOOK_RATING_CHANGED,
+  AUDIOBOOK_PROGRESS_CHANGED_EVENT,
   AchievementEventsService,
 } from '../achievement/achievement-events.service';
 import { BookMetadataLockService } from '../book-metadata-lock/book-metadata-lock.service';
@@ -1377,7 +1378,8 @@ export class BookService {
     let bookTotal: number | undefined;
     let cardPage: Awaited<ReturnType<BookRepository['findCards']>>;
     if (collapseLinked) {
-      const folded = await this.bookRepo.findCardsLinkCollapsed(cardQuery);
+      const sortByRepresentative = query.sort.some(({ field }) => field === 'lastReadAt');
+      const folded = await this.bookRepo.findCardsLinkCollapsed({ ...cardQuery, ...(sortByRepresentative ? { sortByRepresentative } : {}) });
       cardPage = folded;
       bookTotal = folded.bookTotal;
     } else {
@@ -1487,6 +1489,7 @@ export class BookService {
     let collapseLinked = false;
     try {
       collapseLinked = await this.shouldCollapseLinks(query, where);
+      const sortByRepresentative = query.sort.some(({ field }) => field === 'lastReadAt');
       const randomSeedOption = query.randomSeed !== undefined ? { randomSeed: query.randomSeed } : {};
       let response: JumpBucketsResponse;
       if (strategy.kind === 'temporal') {
@@ -1502,15 +1505,19 @@ export class BookService {
         if (shouldCollapse) {
           response = await this.bookRepo.findTemporalJumpBucketsCollapsed({ ...temporalOpts, ...(collapseLinked ? { collapseLinked: true } : {}) });
         } else {
-          // A folded group sits where the listing's full order puts its first member, so the
-          // buckets rank members with that same order.
-          const linkCollapseOrderBy = collapseLinked
-            ? this.queryBuilder.buildOrderBy(query.sort, userId, await this.resolveCustomSortFieldTypes(query.sort), {
-                ...randomSeedOption,
-                ...(query.q !== undefined ? { query: query.q } : {}),
-              })
-            : undefined;
-          response = await this.bookRepo.findTemporalJumpBuckets({ ...temporalOpts, ...(linkCollapseOrderBy ? { linkCollapseOrderBy } : {}) });
+          let linkCollapseOrderBy: SQL[] | null | undefined;
+          if (collapseLinked) {
+            linkCollapseOrderBy = sortByRepresentative
+              ? null
+              : this.queryBuilder.buildOrderBy(query.sort, userId, await this.resolveCustomSortFieldTypes(query.sort), {
+                  ...randomSeedOption,
+                  ...(query.q !== undefined ? { query: query.q } : {}),
+                });
+          }
+          response = await this.bookRepo.findTemporalJumpBuckets({
+            ...temporalOpts,
+            ...(linkCollapseOrderBy !== undefined ? { linkCollapseOrderBy } : {}),
+          });
         }
       } else {
         const discreteOpts = {
@@ -1534,6 +1541,7 @@ export class BookService {
                 ...(query.q !== undefined ? { query: query.q } : {}),
               }),
               ...linkOption,
+              ...(collapseLinked && sortByRepresentative ? { sortByRepresentative } : {}),
             });
       }
       this.logger.log(
@@ -2467,6 +2475,9 @@ export class BookService {
       timeZone: this.resolveUserTimeZone(user),
       strongRereadEvidence,
     });
+    if (!previous || Math.round(previous.percentage) !== Math.round(saved.percentage)) {
+      this.achievementEvents?.emit(AUDIOBOOK_PROGRESS_CHANGED_EVENT, { userId, bookId });
+    }
   }
 
   async syncEbookProgressForAudiobookPlayback(

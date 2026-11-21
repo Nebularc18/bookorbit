@@ -8,7 +8,7 @@ import { AudiobookRepository } from './audiobook.repository';
 import { AudiobookService } from './audiobook.service';
 
 @Module({
-  imports: [AudiobookChaptersModule, BookModule, AchievementModule],
+  imports: [AchievementModule, AudiobookChaptersModule, BookModule],
   controllers: [AudiobookController],
   providers: [AudiobookRepository, AudiobookService],
 })
