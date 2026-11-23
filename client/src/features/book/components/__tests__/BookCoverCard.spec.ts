@@ -782,7 +782,7 @@ describe('BookCoverCard - opening in a new tab', () => {
     expect(openSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('opens the listening format in a new tab when the primary file is an ebook', async () => {
+  it('opens dashboard details in a new tab from the cover and audio from the play button', async () => {
     const book: BookCard = {
       ...presentBook,
       files: [...presentBook.files, { id: 11, format: 'm4b', role: 'content', sizeBytes: null }],
@@ -793,6 +793,12 @@ describe('BookCoverCard - opening in a new tab', () => {
     })
 
     await wrapper.get('.group').trigger('click', { ctrlKey: true })
+
+    expect(routerResolveMock).toHaveBeenCalledWith(detailsLocation)
+    expect(openSpy).toHaveBeenCalledTimes(1)
+    openSpy.mockClear()
+
+    await wrapper.get('[data-testid="grid-card-primary-action"]').trigger('click', { ctrlKey: true })
 
     expect(routerResolveMock).toHaveBeenCalledWith({
       name: 'reader',

@@ -323,35 +323,42 @@ function handleSecondaryLabelClick(event: MouseEvent) {
 }
 
 const canOpenFromCard = computed(() => !isMissing.value && (props.quickOpen ? readerChoices.value.length > 0 : primaryFile.value != null))
-const openDetailsOnClick = computed(() => (props.quickOpen ? !canOpenFromCard.value : thumbnailClickAction.value === 'details'))
-const isPrimaryClickAvailable = computed(() => openDetailsOnClick.value || canOpenFromCard.value)
+const primaryOverlayOpensDetails = computed(() => (props.quickOpen ? !canOpenFromCard.value : thumbnailClickAction.value === 'details'))
+const isPrimaryClickAvailable = computed(() => primaryOverlayOpensDetails.value || canOpenFromCard.value)
 const usePlayAction = computed(() => props.quickOpen === 'listen' || (props.quickOpen !== 'read' && isAudiobook.value))
 const primaryOverlayActionIcon = computed(() => {
-  if (openDetailsOnClick.value) return BookText
+  if (primaryOverlayOpensDetails.value) return BookText
   return usePlayAction.value ? Play : BookOpen
 })
-const primaryOverlayActionIconClass = computed(() => (!openDetailsOnClick.value && usePlayAction.value ? 'ml-[2cqi]' : ''))
-const showExplicitReadButton = computed(() => openDetailsOnClick.value && canOpenFromCard.value)
+const primaryOverlayActionIconClass = computed(() => (!primaryOverlayOpensDetails.value && usePlayAction.value ? 'ml-[2cqi]' : ''))
+const showExplicitReadButton = computed(() => primaryOverlayOpensDetails.value && canOpenFromCard.value)
 const readActionLabel = computed(() => {
   if (usePlayAction.value) {
     return hasProgress.value || props.quickOpen === 'listen' ? t('book.actions.continueListening') : t('book.actions.startListening')
   }
   return hasProgress.value || props.quickOpen === 'read' ? t('book.actions.continueReading') : t('book.actions.startReading')
 })
-const primaryOverlayActionLabel = computed(() => (openDetailsOnClick.value ? t('book.actions.bookDetails') : readActionLabel.value))
+const primaryOverlayActionLabel = computed(() => (primaryOverlayOpensDetails.value ? t('book.actions.bookDetails') : readActionLabel.value))
 
 const explicitReadLocation = computed<RouteLocationRaw | null>(() => {
   if (!canOpenFromCard.value) return null
   const file = props.quickOpen ? (readerChoices.value.length === 1 ? readerChoices.value[0] : null) : primaryFile.value
   return file ? readerLocation(file) : null
 })
-const primaryOverlayLocation = computed(() => (openDetailsOnClick.value ? detailsLocation.value : explicitReadLocation.value))
-const cardUsesTouchOverlay = computed(() => !props.quickOpen && !openDetailsOnClick.value && isTouch.value)
-const cardLocation = computed(() => (cardUsesTouchOverlay.value ? null : primaryOverlayLocation.value))
+const cardOpensDetails = computed(() => !!props.quickOpen || primaryOverlayOpensDetails.value)
+const cardUsesTouchOverlay = computed(() => !cardOpensDetails.value && isTouch.value)
+const cardLocation = computed(() => {
+  if (cardOpensDetails.value) return detailsLocation.value
+  return cardUsesTouchOverlay.value ? null : explicitReadLocation.value
+})
+
+function handleDetailsNavigation(event: MouseEvent) {
+  if (!openInNewTabIfRequested(event, detailsLocation.value)) openBookDetails()
+}
 
 function handlePrimaryOverlayAction(event: MouseEvent) {
-  if (openDetailsOnClick.value) {
-    if (!openInNewTabIfRequested(event, detailsLocation.value)) openBookDetails()
+  if (primaryOverlayOpensDetails.value) {
+    handleDetailsNavigation(event)
     return
   }
 
@@ -375,12 +382,16 @@ function handleCardClick(event: MouseEvent) {
     emit('select', event)
     return
   }
+  if (cardOpensDetails.value) {
+    handleDetailsNavigation(event)
+    return
+  }
   if (cardUsesTouchOverlay.value) {
     showMobileOverlay.value = !showMobileOverlay.value
     return
   }
 
-  handlePrimaryOverlayAction(event)
+  openPrimaryFileExplicit(event)
 }
 
 function handleCardAuxClick(event: MouseEvent) {
@@ -649,7 +660,7 @@ const secondaryLabelLocation = computed(() => (props.selectionMode ? null : reso
             class="absolute inset-0 flex flex-col p-2 transition-opacity duration-150"
             :class="[
               overlayBackground,
-              showMobileOverlay
+              showMobileOverlay || (quickOpen && isTouch)
                 ? 'opacity-100'
                 : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
             ]"
@@ -689,7 +700,7 @@ const secondaryLabelLocation = computed(() => (props.selectionMode ? null : reso
                   <button
                     data-testid="grid-card-primary-action"
                     class="size-[30cqi] flex items-center justify-center rounded-full bg-primary text-white shadow-2xl transition-all duration-300 scale-75 hover:scale-110 active:scale-90"
-                    :class="showMobileOverlay ? 'scale-100' : 'group-hover:scale-100 focus-visible:scale-100'"
+                    :class="showMobileOverlay || (quickOpen && isTouch) ? 'scale-100' : 'group-hover:scale-100 focus-visible:scale-100'"
                     :aria-label="primaryOverlayActionLabel"
                     @click.stop="handlePrimaryOverlayAction"
                   >
