@@ -7,7 +7,9 @@ import {
   ACHIEVEMENT_EVENT_BOOK_RATING_CHANGED,
   ACHIEVEMENT_EVENT_BOOK_STATUS_CHANGED,
   ACHIEVEMENT_EVENT_READING_SESSION_SAVED,
+  AUDIOBOOK_PROGRESS_CHANGED_EVENT,
   AchievementEventsService,
+  type AudiobookProgressChangedPayload,
   type BookHardcoverEditionChangedPayload,
   type BookProgressChangedPayload,
   type BookRatingChangedPayload,
@@ -40,6 +42,10 @@ export class HardcoverEventListener implements OnModuleInit {
       this.handleProgressChanged(payload);
     });
 
+    this.achievementEvents.on(AUDIOBOOK_PROGRESS_CHANGED_EVENT, (payload: AudiobookProgressChangedPayload) => {
+      this.handleProgressChanged(payload);
+    });
+
     this.achievementEvents.on(ACHIEVEMENT_EVENT_BOOK_RATING_CHANGED, (payload: BookRatingChangedPayload) => {
       this.handleRatingChanged(payload);
     });
@@ -57,7 +63,7 @@ export class HardcoverEventListener implements OnModuleInit {
     this.scheduler.requestSyncForBookFile({ userId: payload.userId, bookFileId: payload.bookFileId, reason: 'progress' });
   }
 
-  private handleProgressChanged(payload: BookProgressChangedPayload): void {
+  private handleProgressChanged(payload: Pick<BookProgressChangedPayload, 'userId' | 'bookId'>): void {
     this.scheduler.requestSync({ userId: payload.userId, bookId: payload.bookId, reason: 'progress' });
   }
 

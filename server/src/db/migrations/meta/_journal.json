@@ -1142,6 +1142,13 @@
       "when": 1794947035400,
       "tag": "0163_index_koreader_page_stats_page_start",
       "breakpoints": true
+    },
+    {
+      "idx": 164,
+      "version": "7",
+      "when": 1795446556430,
+      "tag": "0164_hardcover_active_format",
+      "breakpoints": true
     }
   ]
 }

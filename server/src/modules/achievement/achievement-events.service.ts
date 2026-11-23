@@ -66,7 +66,9 @@ export interface BookProgressChangedPayload {
   source: 'koreader' | 'kobo' | 'web_reader';
 }
 
-export type AudiobookProgressChangedPayload = Pick<BookProgressChangedPayload, 'userId' | 'bookId'>;
+export type AudiobookProgressChangedPayload = Pick<BookProgressChangedPayload, 'userId' | 'bookId'> & {
+  wholePercentChanged?: boolean;
+};
 
 export interface BookHardcoverEditionChangedPayload {
   userId: number;

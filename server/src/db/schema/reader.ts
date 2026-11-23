@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   date,
   index,
@@ -416,6 +417,8 @@ export const audiobookProgress = pgTable(
     positionSeconds: real('position_seconds').notNull().default(0),
     revision: integer('revision').notNull().default(1),
     capturedAt: timestamp('captured_at', { withTimezone: true }).notNull().defaultNow(),
+    // A mapped ebook position can resume playback but does not represent listening activity.
+    mirroredFromEbook: boolean('mirrored_from_ebook'),
     operationId: uuid('operation_id'),
     manifestRevision: varchar('manifest_revision', { length: 64 }),
     updatedAt: timestamp('updated_at', { withTimezone: true })

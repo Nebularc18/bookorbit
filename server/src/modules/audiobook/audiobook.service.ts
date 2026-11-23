@@ -141,6 +141,7 @@ export class AudiobookService {
       positionSeconds: positionMs / 1000,
       percentage,
       capturedAt: new Date(dto.capturedAt),
+      mirroredFromEbook: false,
       operationId: dto.operationId,
       manifestRevision,
     };

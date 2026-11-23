@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Permission } from '@bookorbit/types';
 import { PgDialect } from 'drizzle-orm/pg-core';
+import { drizzle } from 'drizzle-orm/node-postgres';
 
 import * as schema from '../../db/schema';
 import { HardcoverRepository } from './hardcover.repository';
@@ -56,6 +57,7 @@ function makeRepository() {
     delete: vi.fn().mockReturnValue(deleteChain),
     update: vi.fn().mockReturnValue(updateChain),
     select: vi.fn().mockReturnValue({ from: bookIdFrom }),
+    selectDistinctOn: vi.fn(),
   };
 
   return {
@@ -226,7 +228,7 @@ describe('HardcoverRepository', () => {
     const { repo, db } = makeRepository();
     const selectArgs: Array<Record<string, unknown>> = [];
     const chain: Record<string, unknown> = {};
-    for (const method of ['from', 'innerJoin', 'leftJoin', 'where', 'groupBy', 'as']) {
+    for (const method of ['from', 'innerJoin', 'leftJoin', 'where', 'groupBy', 'as', 'orderBy']) {
       chain[method] = vi.fn().mockReturnValue(chain);
     }
     chain.then = (resolve: (rows: unknown[]) => void) => resolve([]);
@@ -234,6 +236,8 @@ describe('HardcoverRepository', () => {
       selectArgs.push(cols);
       return chain;
     });
+
+    db.selectDistinctOn.mockReturnValue(chain);
 
     await repo.findSyncableBooks(7);
 
@@ -243,18 +247,44 @@ describe('HardcoverRepository', () => {
     expect(mainSelect).toHaveProperty('format');
   });
 
-  it('uses audiobook progress for an audiobook sync snapshot', async () => {
-    const { repo, db } = makeRepository();
-    const chain: Record<string, unknown> = {};
-    for (const method of ['from', 'innerJoin', 'leftJoin', 'where', 'groupBy', 'as']) {
-      chain[method] = vi.fn().mockReturnValue(chain);
-    }
-    chain.then = (resolve: (rows: unknown[]) => void) => resolve([{ bookId: 42, format: 'm4b', readingProgress: null, audioProgress: 37.5 }]);
-    db.select.mockImplementation(() => chain);
+  it.each([
+    { textDay: 1, mirrored: null, expectedFormat: 'm4b', expectedProgress: 37.5 },
+    { textDay: 3, mirrored: false, expectedFormat: 'pdf', expectedProgress: 20 },
+    { textDay: 2, mirrored: false, expectedFormat: 'm4b', expectedProgress: 37.5 },
+    { textDay: 2, mirrored: true, expectedFormat: 'pdf', expectedProgress: 20 },
+    { textDay: 1, mirrored: true, expectedFormat: 'pdf', expectedProgress: 20 },
+    { textDay: null, mirrored: null, expectedFormat: 'm4b', expectedProgress: 37.5 },
+  ])(
+    'selects $expectedFormat with text day $textDay and mirrored audio $mirrored',
+    async ({ textDay, mirrored, expectedFormat, expectedProgress }) => {
+      const { repo, db } = makeRepository();
+      const chain: Record<string, unknown> = {};
+      for (const method of ['from', 'innerJoin', 'leftJoin', 'where', 'groupBy', 'as', 'orderBy']) {
+        chain[method] = vi.fn().mockReturnValue(chain);
+      }
+      chain.then = (resolve: (rows: unknown[]) => void) =>
+        resolve([
+          {
+            bookId: 42,
+            format: 'epub',
+            textFormat: textDay == null ? null : 'pdf',
+            readingProgress: textDay == null ? null : 20,
+            textReadAt: textDay == null ? null : new Date(Date.UTC(2026, 0, textDay)),
+            audioFormat: 'm4b',
+            audioProgress: 37.5,
+            audioCapturedAt: new Date(Date.UTC(2026, 0, 2)),
+            mirroredFromEbook: mirrored,
+          },
+        ]);
+      db.select.mockReturnValue(chain as never);
+      db.selectDistinctOn.mockReturnValue(chain);
 
-    await expect(repo.findSyncableBooks(7)).resolves.toEqual([{ bookId: 42, format: 'm4b', progress: 37.5 }]);
-    expect(chain.leftJoin).toHaveBeenCalledWith(schema.audiobookProgress, expect.anything());
-  });
+      await expect(repo.findSyncableBooks(7)).resolves.toEqual([
+        expect.objectContaining({ bookId: 42, primaryFormat: 'epub', format: expectedFormat, progress: expectedProgress }),
+      ]);
+      expect(chain.leftJoin).toHaveBeenCalledWith(schema.audiobookProgress, expect.anything());
+    },
+  );
 
   it('findSyncableBook returns a book from findSyncableBooks', async () => {
     const { repo } = makeRepository();
@@ -271,7 +301,7 @@ describe('HardcoverRepository', () => {
     const { repo, db } = makeRepository();
     const selectArgs: Array<Record<string, unknown>> = [];
     const chain: Record<string, unknown> = {};
-    for (const method of ['from', 'innerJoin', 'leftJoin', 'where', 'groupBy', 'as']) {
+    for (const method of ['from', 'innerJoin', 'leftJoin', 'where', 'groupBy', 'as', 'orderBy']) {
       chain[method] = vi.fn().mockReturnValue(chain);
     }
     chain.then = (resolve: (rows: unknown[]) => void) => resolve([{ bookId: 42 }]);
@@ -280,7 +310,8 @@ describe('HardcoverRepository', () => {
       return chain;
     });
 
-    await expect(repo.findSyncableBook(7, 42)).resolves.toEqual({ bookId: 42 });
+    db.selectDistinctOn.mockReturnValue(chain);
+    await expect(repo.findSyncableBook(7, 42)).resolves.toEqual(expect.objectContaining({ bookId: 42 }));
 
     expect(chain.where).toHaveBeenCalled();
     expect(selectArgs.some((cols) => cols && 'bookId' in cols && 'status' in cols)).toBe(true);
@@ -295,25 +326,24 @@ describe('HardcoverRepository', () => {
     chain.then = (resolve: (rows: unknown[]) => void) => resolve([{ bookId: 42 }]);
     db.select.mockImplementation(() => chain);
 
-    await expect(repo.findCurrentReadingBooks(7, 200)).resolves.toEqual([{ bookId: 42 }]);
+    db.selectDistinctOn.mockReturnValue(chain);
+    await expect(repo.findCurrentReadingBooks(7, 200)).resolves.toEqual([expect.objectContaining({ bookId: 42 })]);
     expect(chain.where).toHaveBeenCalled();
     expect(chain.orderBy).toHaveBeenCalled();
     expect(chain.limit).toHaveBeenCalledWith(200);
   });
 
   it('leaves the unbounded sync query without an order or limit', async () => {
-    const { repo, db } = makeRepository();
-    const chain: Record<string, unknown> = {};
-    for (const method of ['from', 'innerJoin', 'leftJoin', 'where', 'groupBy', 'as', 'orderBy', 'limit']) {
-      chain[method] = vi.fn().mockReturnValue(chain);
-    }
-    chain.then = (resolve: (rows: unknown[]) => void) => resolve([{ bookId: 42 }]);
-    db.select.mockImplementation(() => chain);
+    const query = vi.fn<(config: { text: string }, params: unknown[]) => Promise<{ rows: unknown[] }>>().mockResolvedValue({ rows: [] });
+    const db = drizzle({ client: { query } as never, schema });
 
-    await repo.findSyncableBooks(7);
+    await new HardcoverRepository(db).findSyncableBooks(7);
 
-    expect(chain.orderBy).not.toHaveBeenCalled();
-    expect(chain.limit).not.toHaveBeenCalled();
+    const [config, params] = query.mock.calls[0]!;
+    expect(config.text).toContain('select distinct on ("book_files"."book_id")');
+    expect(config.text).toContain('order by "book_files"."book_id", "reading_progress"."last_read_at" desc');
+    expect(config.text).toMatch(/where "user_book_status"\."status" <> \$\d+$/);
+    expect(params).toContain(7);
   });
 
   it('updateEditionIfLinked updates an existing link and returns true', async () => {

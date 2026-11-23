@@ -164,7 +164,10 @@ export class AudiobookEbookProgressSyncService {
           audio.currentFileId,
           audio.positionSeconds,
           audio.percentage,
-          sourceUpdatedAt,
+          {
+            sourceUpdatedAt,
+            mirroredFromEbook: true,
+          },
         );
         if (!saved) return false;
       }

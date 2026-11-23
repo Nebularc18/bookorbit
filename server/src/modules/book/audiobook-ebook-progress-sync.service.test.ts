@@ -281,7 +281,7 @@ describe('AudiobookEbookProgressSyncService', () => {
       }),
     ).resolves.toBe(true);
 
-    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 50, 50, SOURCE_TIME);
+    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 50, 50, { sourceUpdatedAt: SOURCE_TIME, mirroredFromEbook: true });
     expect(bookRepo.upsertSyncedEpubProgressIfNewer).toHaveBeenCalledWith(
       expect.objectContaining({ fileId: 30, percentage: 50, positionSeconds: 50, sourceUpdatedAt: SOURCE_TIME }),
     );
@@ -321,7 +321,7 @@ describe('AudiobookEbookProgressSyncService', () => {
       service.syncFromEbookProgress({ userId: 7, bookId: 5, bookFileId: 20, percentage: 40, cfi: 'epubcfi(/6/4)', sourceUpdatedAt: SOURCE_TIME }),
     ).resolves.toBe(true);
 
-    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 500, 50, SOURCE_TIME);
+    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 500, 50, { sourceUpdatedAt: SOURCE_TIME, mirroredFromEbook: true });
   });
 
   it('skips a zero-length clip when propagating an EPUB narration position to a sibling', async () => {
@@ -341,7 +341,7 @@ describe('AudiobookEbookProgressSyncService', () => {
       }),
     ).resolves.toBe(true);
 
-    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 75, 75, SOURCE_TIME);
+    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 75, 75, { sourceUpdatedAt: SOURCE_TIME, mirroredFromEbook: true });
     expect(positionConverter.fragmentToPositions).toHaveBeenCalledWith(
       expect.objectContaining({ bookFileId: 20, sourceBookFileId: 30, fragment: 'after' }),
     );
@@ -369,7 +369,7 @@ describe('AudiobookEbookProgressSyncService', () => {
 
     // The stale marker names 'first' at 10 seconds; the page the reader is on resolves to 'second'.
     expect(positionConverter.nearestFragmentForPosition).toHaveBeenCalledWith(expect.objectContaining({ bookFileId: 20, cfi: 'epubcfi(/6/4)' }));
-    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 50, 50, SOURCE_TIME);
+    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 50, 50, { sourceUpdatedAt: SOURCE_TIME, mirroredFromEbook: true });
     expect(bookRepo.upsertSyncedEpubProgressIfNewer).toHaveBeenCalledWith(
       expect.objectContaining({ fileId: 30, positionSeconds: 50, mediaOverlayFragment: 'OPS/chapter.xhtml#second' }),
     );
@@ -382,7 +382,7 @@ describe('AudiobookEbookProgressSyncService', () => {
       service.syncFromEbookProgress({ userId: 7, bookId: 5, bookFileId: 30, percentage: 75, cfi: 'epubcfi(/6/4)', sourceUpdatedAt: SOURCE_TIME }),
     ).resolves.toBe(true);
 
-    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 50, 50, SOURCE_TIME);
+    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 50, 50, { sourceUpdatedAt: SOURCE_TIME, mirroredFromEbook: true });
     expect(bookRepo.upsertSyncedEpubProgressIfNewer).toHaveBeenCalledOnce();
     expect(bookRepo.upsertSyncedEpubProgressIfNewer).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -430,7 +430,7 @@ describe('AudiobookEbookProgressSyncService', () => {
       }),
     ).resolves.toBe(true);
 
-    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 10, 10, SOURCE_TIME);
+    expect(bookRepo.upsertAudioProgress).toHaveBeenCalledWith(7, 5, 10, 10, 10, { sourceUpdatedAt: SOURCE_TIME, mirroredFromEbook: true });
     expect(bookRepo.upsertSyncedEpubProgressIfNewer).not.toHaveBeenCalled();
   });
 

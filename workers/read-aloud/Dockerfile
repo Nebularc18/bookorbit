@@ -44,8 +44,10 @@ FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
 # The worker never runs npm, and the npm bundled with the base image carries its own copies of
 # packages such as undici and brace-expansion that the workspace overrides cannot reach.
+# Install the Kerberos libraries explicitly so APT refreshes the copies inherited from the base image.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends apt ca-certificates ffmpeg libapt-pkg7.0 tini zlib1g && \
+    apt-get install -y --no-install-recommends \
+      apt ca-certificates ffmpeg libapt-pkg7.0 libgssapi-krb5-2 libk5crypto3 libkrb5-3 libkrb5support0 tini zlib1g && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx && \
     mkdir -p /data/read-aloud/jobs /data/read-aloud/tmp /data/read-aloud/ghost-story && \

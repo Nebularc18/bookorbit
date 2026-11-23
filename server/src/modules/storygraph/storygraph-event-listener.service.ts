@@ -34,7 +34,7 @@ export class StorygraphEventListener implements OnModuleInit {
     });
 
     this.achievementEvents.on(AUDIOBOOK_PROGRESS_CHANGED_EVENT, (payload: AudiobookProgressChangedPayload) => {
-      this.handleProgressChanged(payload);
+      if (payload.wholePercentChanged !== false) this.handleProgressChanged(payload);
     });
   }
 

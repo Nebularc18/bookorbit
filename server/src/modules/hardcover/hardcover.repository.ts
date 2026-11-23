@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { isAudioFormat, Permission } from '@bookorbit/types';
+import { AUDIO_FORMAT_LIST, isAudioFormat, Permission } from '@bookorbit/types';
 import type { ContentFilterRules, ReadStatus } from '@bookorbit/types';
-import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { alias } from 'drizzle-orm/pg-core';
 
 import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
 import { resolveTimeZone } from '../../common/utils/timezone.utils';
@@ -51,6 +52,7 @@ export interface BookSyncData {
   hardcoverEditionId?: string | null;
   pageCount: number | null;
   format: string | null;
+  primaryFormat?: string | null;
   status: string;
   startedAt: Date | null;
   finishedAt: Date | null;
@@ -260,17 +262,25 @@ export class HardcoverRepository {
   ): Promise<BookSyncData[]> {
     const bookFilter = bookId !== undefined ? eq(schema.books.id, bookId) : undefined;
 
-    const maxProgressSq = this.db
-      .select({
-        bookId: schema.books.id,
-        maxProgress: sql<number>`max(${schema.readingProgress.percentage})`.as('max_progress'),
+    const audioFile = alias(schema.bookFiles, 'hardcover_audio_file');
+    const textProgress = this.db
+      .selectDistinctOn([schema.bookFiles.bookId], {
+        bookId: schema.bookFiles.bookId,
+        format: schema.bookFiles.format,
+        percentage: schema.readingProgress.percentage,
+        lastReadAt: schema.readingProgress.lastReadAt,
       })
-      .from(schema.books)
-      .innerJoin(schema.bookFiles, eq(schema.bookFiles.bookId, schema.books.id))
-      .innerJoin(schema.readingProgress, and(eq(schema.readingProgress.bookFileId, schema.bookFiles.id), eq(schema.readingProgress.userId, userId)))
-      .where(bookFilter)
-      .groupBy(schema.books.id)
-      .as('max_progress_sq');
+      .from(schema.readingProgress)
+      .innerJoin(schema.bookFiles, eq(schema.bookFiles.id, schema.readingProgress.bookFileId))
+      .where(
+        and(
+          eq(schema.readingProgress.userId, userId),
+          bookId !== undefined ? eq(schema.bookFiles.bookId, bookId) : undefined,
+          or(isNull(schema.bookFiles.format), notInArray(sql`lower(${schema.bookFiles.format})`, [...AUDIO_FORMAT_LIST])),
+        ),
+      )
+      .orderBy(schema.bookFiles.bookId, desc(schema.readingProgress.lastReadAt), desc(schema.bookFiles.id))
+      .as('hardcover_text_progress');
 
     const firstAuthorSq = this.db
       .select({
@@ -291,7 +301,13 @@ export class HardcoverRepository {
         updatedAt: sql<Date | null>`max(${schema.readingAttempts.updatedAt})`.mapWith(schema.readingAttempts.updatedAt).as('attempts_updated_at'),
       })
       .from(schema.readingAttempts)
-      .where(and(eq(schema.readingAttempts.userId, userId), sql`${schema.readingAttempts.deletedAt} is null`))
+      .where(
+        and(
+          eq(schema.readingAttempts.userId, userId),
+          isNull(schema.readingAttempts.deletedAt),
+          bookId !== undefined ? eq(schema.readingAttempts.bookId, bookId) : undefined,
+        ),
+      )
       .groupBy(schema.readingAttempts.bookId)
       .as('hardcover_attempts_sq');
 
@@ -311,16 +327,22 @@ export class HardcoverRepository {
         startedAt: schema.userBookStatus.startedAt,
         finishedAt: schema.userBookStatus.finishedAt,
         rating: schema.userBookRatings.rating,
-        readingProgress: maxProgressSq.maxProgress,
+        readingProgress: textProgress.percentage,
+        textFormat: textProgress.format,
+        textReadAt: textProgress.lastReadAt,
         audioProgress: schema.audiobookProgress.percentage,
+        audioFormat: audioFile.format,
+        audioCapturedAt: schema.audiobookProgress.capturedAt,
+        mirroredFromEbook: schema.audiobookProgress.mirroredFromEbook,
         attemptsUpdatedAt: attemptsSq.updatedAt,
       })
       .from(schema.books)
       .leftJoin(schema.userBookStatus, and(eq(schema.userBookStatus.bookId, schema.books.id), eq(schema.userBookStatus.userId, userId)))
       .leftJoin(schema.bookMetadata, eq(schema.bookMetadata.bookId, schema.books.id))
       .leftJoin(schema.userBookRatings, and(eq(schema.userBookRatings.bookId, schema.books.id), eq(schema.userBookRatings.userId, userId)))
-      .leftJoin(maxProgressSq, eq(maxProgressSq.bookId, schema.books.id))
+      .leftJoin(textProgress, eq(textProgress.bookId, schema.books.id))
       .leftJoin(schema.audiobookProgress, and(eq(schema.audiobookProgress.bookId, schema.books.id), eq(schema.audiobookProgress.userId, userId)))
+      .leftJoin(audioFile, and(eq(audioFile.id, schema.audiobookProgress.currentFileId), eq(audioFile.bookId, schema.books.id)))
       .leftJoin(firstAuthorSq, eq(firstAuthorSq.bookId, schema.books.id))
       .leftJoin(attemptsSq, eq(attemptsSq.bookId, schema.books.id))
       .leftJoin(schema.bookFiles, eq(schema.bookFiles.id, schema.books.primaryFileId));
@@ -334,11 +356,23 @@ export class HardcoverRepository {
         ? await filtered
         : await filtered.orderBy(asc(schema.bookMetadata.title), asc(schema.books.id)).limit(options.limit);
 
-    return rows.map(({ readingProgress, audioProgress, ...row }) => ({
-      ...row,
-      status: row.status as string,
-      progress: row.format && isAudioFormat(row.format) ? audioProgress : readingProgress,
-    }));
+    return rows.map(({ format, readingProgress, textFormat, textReadAt, audioProgress, audioFormat, audioCapturedAt, mirroredFromEbook, ...row }) => {
+      // Read-along mirrors can share the source timestamp. Older saves have no origin marker.
+      const audioWinsTie = mirroredFromEbook === false || (format != null && isAudioFormat(format));
+      const useAudio =
+        mirroredFromEbook !== true &&
+        audioFormat != null &&
+        isAudioFormat(audioFormat) &&
+        audioCapturedAt != null &&
+        (textReadAt == null || audioCapturedAt > textReadAt || (audioCapturedAt.getTime() === textReadAt.getTime() && audioWinsTie));
+      return {
+        ...row,
+        status: row.status as string,
+        primaryFormat: format,
+        format: useAudio ? audioFormat : textReadAt != null ? textFormat : format,
+        progress: useAudio ? audioProgress : readingProgress,
+      };
+    });
   }
 
   async findUserTimeZone(userId: number): Promise<string> {
