@@ -659,6 +659,7 @@ export class HardcoverSyncService {
         lastSyncedAt: new Date(),
         lastSyncedStatus: book.status,
         lastSyncedProgress: progressSynced ? book.progress : null,
+        lastSyncedFormat: book.format ?? null,
         lastSyncedRating: book.rating,
         lastSyncedStartedAt: startDate,
         lastSyncedFinishedAt: endDate,
@@ -976,6 +977,7 @@ export class HardcoverSyncService {
     }
     if (book.status !== state.lastSyncedStatus) return true;
     if (book.progress !== state.lastSyncedProgress) return true;
+    if (book.progress != null && book.format !== (state.lastSyncedFormat ?? book.primaryFormat ?? book.format)) return true;
     if (book.rating !== state.lastSyncedRating) return true;
     const startDate = toDateString(book.startedAt);
     const endDate = toDateString(book.finishedAt);
@@ -989,6 +991,7 @@ export class HardcoverSyncService {
       lastSyncedAt: new Date(),
       lastSyncedStatus: book.status,
       lastSyncedProgress: book.progress,
+      lastSyncedFormat: book.format ?? null,
       lastSyncedRating: book.rating,
       lastSyncedStartedAt: toDateString(book.startedAt),
       lastSyncedFinishedAt: toDateString(book.finishedAt),

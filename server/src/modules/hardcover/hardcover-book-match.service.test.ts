@@ -97,7 +97,7 @@ describe('HardcoverBookMatchService', () => {
       ],
     });
 
-    const result = await makeService().matchBook(1, 'tok', baseBook);
+    const result = await makeService().matchBook(1, 'tok', { ...baseBook, format: 'epub', progress: 29 });
 
     expect(result).toEqual({
       hardcoverBookId: 100,
@@ -127,6 +127,30 @@ describe('HardcoverBookMatchService', () => {
       editionAudioSeconds: 3600,
       matchMethod: 'cached',
     });
+  });
+
+  it('switches a cached EPUB edition to the audiobook edition for listening progress', async () => {
+    mockRepo.findBookState.mockResolvedValue({ hardcoverBookId: 100, hardcoverEditionId: 200, matchBasis: BASE_BASIS });
+    mockClient.query
+      .mockResolvedValueOnce({ books: [{ id: 100, editions: [{ id: 200, pages: 320, isbn_13: baseBook.isbn13 }] }] })
+      .mockResolvedValueOnce({ books: [{ id: 100, editions: [{ id: 201, audio_seconds: 3600 }] }] });
+
+    await expect(
+      makeService().matchBook(1, 'tok', { ...baseBook, hardcoverEditionId: '200', primaryFormat: 'epub', format: 'm4b', progress: 29 }),
+    ).resolves.toMatchObject({ hardcoverBookId: 100, hardcoverEditionId: 201, editionAudioSeconds: 3600 });
+
+    expect(mockClient.query).toHaveBeenLastCalledWith(1, 'tok', expect.stringContaining('audio_seconds: { _gt: 0 }'), { id: 100 });
+  });
+
+  it('restores the preferred ebook edition when reading resumes', async () => {
+    mockRepo.findBookState.mockResolvedValue({ hardcoverBookId: 100, hardcoverEditionId: 201, matchBasis: BASE_BASIS });
+    mockClient.query
+      .mockResolvedValueOnce({ books: [{ id: 100, editions: [{ id: 201, audio_seconds: 3600 }] }] })
+      .mockResolvedValueOnce({ books: [{ id: 100, editions: [{ id: 200, pages: 320 }] }] });
+
+    await expect(
+      makeService().matchBook(1, 'tok', { ...baseBook, hardcoverEditionId: '200', primaryFormat: 'epub', format: 'epub', progress: 29 }),
+    ).resolves.toMatchObject({ hardcoverBookId: 100, hardcoverEditionId: 200, editionPages: 320 });
   });
 
   it('re-points a cached match when the cached edition no longer exists on Hardcover', async () => {

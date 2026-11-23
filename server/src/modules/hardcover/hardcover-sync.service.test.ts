@@ -237,6 +237,45 @@ describe('HardcoverSyncService', () => {
     });
 
     it.each([
+      { previousFormat: null, format: 'm4b', field: 'progress_seconds', value: 1512, editionId: 20 },
+      { previousFormat: 'm4b', format: 'epub', field: 'progress_pages', value: 126, editionId: 21 },
+    ])('syncs a switch to $format even at the same percentage', async ({ previousFormat, format, field, value, editionId }) => {
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findBookSyncData.mockResolvedValue({ ...readingBook, format, primaryFormat: 'epub' });
+      mockRepo.findBookState.mockResolvedValue({
+        hardcoverBookId: 10,
+        hardcoverReadId: 77,
+        lastSyncedAt: new Date(),
+        lastSyncedStatus: 'reading',
+        lastSyncedStartedAt: '2024-01-01',
+        lastSyncedFinishedAt: null,
+        lastSyncedRating: null,
+        lastSyncedProgress: 42,
+        lastSyncedFormat: previousFormat,
+      });
+      mockMatchService.matchBook.mockResolvedValue({
+        hardcoverBookId: 10,
+        hardcoverEditionId: editionId,
+        editionPages: 300,
+        editionAudioSeconds: 3600,
+        matchMethod: 'cached',
+      });
+      mockClient.query
+        .mockResolvedValueOnce({ insert_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ update_user_book: { user_book: { id: 55 }, error: null } })
+        .mockResolvedValueOnce({ user_book_reads: [{ id: 77, started_at: '2024-01-01', finished_at: null }] })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } });
+
+      await expect(makeService().syncBook(1, 1)).resolves.toBe('synced');
+
+      expect(mockClient.query).toHaveBeenNthCalledWith(4, 1, 'tok', expect.stringContaining('mutation UpdateUserBookRead'), {
+        id: 77,
+        object: { started_at: '2024-01-01', edition_id: editionId, [field]: value },
+      });
+      expect(mockRepo.upsertBookState).toHaveBeenCalledWith(expect.objectContaining({ lastSyncedProgress: 42, lastSyncedFormat: format }));
+    });
+
+    it.each([
       { format: 'm4b', field: 'progress_seconds', total: 3600 },
       { format: 'epub', field: 'progress_pages', total: 300 },
     ])('backdates delayed $format progress to the original session days', async ({ format, field, total }) => {

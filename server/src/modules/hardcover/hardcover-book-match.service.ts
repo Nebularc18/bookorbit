@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
-import type { HardcoverEdition as HardcoverEditionSummary, HardcoverEditionsResult } from '@bookorbit/types';
+import { isAudioFormat, type HardcoverEdition as HardcoverEditionSummary, type HardcoverEditionsResult } from '@bookorbit/types';
 
 import { parsePublishedDateKey } from '../../common/utils/published-date.utils';
 import { sanitizeLogValue } from '../../common/utils/log-sanitize.utils';
@@ -33,6 +33,7 @@ query FindBookByISBN13($isbn: String!) {
     editions(where: { isbn_13: { _eq: $isbn } }, limit: 1) {
       id
       pages
+      reading_format_id
       audio_seconds
     }
   }
@@ -45,6 +46,7 @@ query FindBookByISBN10($isbn: String!) {
     editions(where: { isbn_10: { _eq: $isbn } }, limit: 1) {
       id
       pages
+      reading_format_id
       audio_seconds
     }
   }
@@ -69,6 +71,7 @@ const EDITION_FIELDS = `
       pages
       isbn_10
       isbn_13
+      reading_format_id
       audio_seconds`;
 
 const FIND_BOOKS_BY_IDS_QUERY = `
@@ -110,6 +113,26 @@ query FindBookEditionsById($id: Int!) {
   }
 }`;
 
+function findProgressEditionsQuery(audio: boolean): string {
+  const where = audio
+    ? '{ audio_seconds: { _gt: 0 } }'
+    : `{
+      pages: { _gt: 0 }
+      _and: [
+        { _or: [{ audio_seconds: { _is_null: true } }, { audio_seconds: { _lte: 0 } }] }
+        { _or: [{ reading_format_id: { _is_null: true } }, { reading_format_id: { _neq: ${AUDIOBOOK_READING_FORMAT_ID} } }] }
+      ]
+    }`;
+  return `
+query FindBookProgressEditions($id: Int!) {
+  books(where: { id: { _eq: $id } }, limit: 1) {
+    id
+    editions(where: ${where}, limit: ${EDITION_SELECTION_LIMIT}, order_by: { id: asc }) {${EDITION_FIELDS}
+    }
+  }
+}`;
+}
+
 // Resolves the cached edition by id, scoped to the book, instead of checking membership in the
 // capped list above: popular works have hundreds of editions, and a pick past the cap is still
 // the user's edition. Without this, the next sync would silently replace it via pickBestEdition.
@@ -122,14 +145,13 @@ query FindBookEditionMetricsById($id: Int!, $editionId: Int!) {
   }
 }`;
 
-const AUDIO_FORMATS = new Set(['m4b', 'm4a', 'mp3', 'aax', 'aacx', 'aac', 'flac', 'ogg', 'opus', 'wma', 'mka']);
-
 interface HardcoverEdition {
   id: number;
   pages?: number | null;
   isbn_10?: string | null;
   isbn_13?: string | null;
   audio_seconds?: number | null;
+  reading_format_id?: number | null;
 }
 
 interface BooksQueryResult {
@@ -484,8 +506,8 @@ export class HardcoverBookMatchService {
   }
 
   /**
-   * The edition named in the book's metadata wins whenever it belongs to the matched book, looked up
-   * directly when the capped list does not carry it. An edition of another book is ignored.
+   * Prefer the metadata edition when it belongs to the matched book and can represent the progress.
+   * A format-filtered lookup can find a compatible edition beyond the unfiltered catalogue cap.
    */
   private async chooseEdition(
     userId: number,
@@ -496,23 +518,45 @@ export class HardcoverBookMatchService {
     fallback: HardcoverEdition | undefined,
   ): Promise<HardcoverEdition | undefined> {
     const preferredId = parseHardcoverEditionId(book.hardcoverEditionId);
-    if (preferredId === null || preferredId === fallback?.id) return fallback;
+    let preferred = editions.find((edition) => edition.id === preferredId);
+    if (preferredId !== null && !preferred) {
+      try {
+        const data = await this.client.query<BooksQueryResult>(userId, token, FIND_BOOK_EDITION_METRICS_BY_ID_QUERY, {
+          id: hardcoverBookId,
+          editionId: preferredId,
+        });
+        preferred = data.books?.[0]?.editions?.find((edition) => edition.id === preferredId);
+      } catch (err) {
+        const error = sanitizeLogValue(err instanceof Error ? err.message : String(err));
+        this.logger.warn(
+          `[hardcover.book_match] [fail] userId=${userId} bookId=${book.bookId} method=metadata_edition error="${error}" - metadata edition lookup failed`,
+        );
+      }
+    }
 
-    const listed = editions.find((edition) => edition.id === preferredId);
-    if (listed) return listed;
+    const selected = preferred ?? fallback;
+    if (book.progress == null || book.format == null) return selected;
+    const audio = isAudioFormat(book.format);
+    if (preferred && this.editionIsAudio(preferred) === audio) return preferred;
+    if (fallback && this.supportsProgress(fallback, audio)) return fallback;
+
+    const compatible = editions.filter((edition) => this.supportsProgress(edition, audio));
+    if (compatible.length > 0) return this.pickBestEdition(compatible, book);
 
     try {
-      const data = await this.client.query<BooksQueryResult>(userId, token, FIND_BOOK_EDITION_METRICS_BY_ID_QUERY, {
+      const data = await this.client.query<BooksQueryResult>(userId, token, findProgressEditionsQuery(audio), {
         id: hardcoverBookId,
-        editionId: preferredId,
       });
-      return data.books?.[0]?.editions?.find((edition) => edition.id === preferredId) ?? fallback;
+      return this.pickBestEdition(
+        (data.books?.[0]?.editions ?? []).filter((edition) => this.supportsProgress(edition, audio)),
+        book,
+      );
     } catch (err) {
       const error = sanitizeLogValue(err instanceof Error ? err.message : String(err));
       this.logger.warn(
-        `[hardcover.book_match] [fail] userId=${userId} bookId=${book.bookId} method=metadata_edition error="${error}" - metadata edition lookup failed`,
+        `[hardcover.book_match] [fail] userId=${userId} bookId=${book.bookId} method=progress_edition error="${error}" - progress edition lookup failed`,
       );
-      return fallback;
+      return undefined;
     }
   }
 
@@ -572,7 +616,6 @@ export class HardcoverBookMatchService {
     cachedEditionId: number | null,
   ): Promise<{ hardcoverEditionId: number | null; editionPages: number | null; editionAudioSeconds: number | null }> {
     try {
-      // A missing progress metric is not a reason to silently re-point the user's edition.
       if (cachedEditionId != null) {
         const data = await this.client.query<BooksQueryResult>(userId, token, FIND_BOOK_EDITION_METRICS_BY_ID_QUERY, {
           id: hardcoverBookId,
@@ -585,10 +628,14 @@ export class HardcoverBookMatchService {
 
         const cachedEdition = hardcoverBook.editions?.find((edition) => edition.id === cachedEditionId);
         if (cachedEdition) {
+          const edition =
+            book.progress == null || book.format == null || this.editionIsAudio(cachedEdition) === isAudioFormat(book.format)
+              ? cachedEdition
+              : await this.chooseEdition(userId, token, hardcoverBookId, [cachedEdition], book, cachedEdition);
           return {
-            hardcoverEditionId: cachedEditionId,
-            editionPages: this.normalizeEditionPages(cachedEdition.pages),
-            editionAudioSeconds: this.normalizeEditionAudioSeconds(cachedEdition.audio_seconds),
+            hardcoverEditionId: edition?.id ?? cachedEditionId,
+            editionPages: this.normalizeEditionPages(edition?.pages),
+            editionAudioSeconds: this.normalizeEditionAudioSeconds(edition?.audio_seconds),
           };
         }
       }
@@ -649,7 +696,7 @@ export class HardcoverBookMatchService {
   }
 
   private isBetterEdition(candidate: HardcoverEdition, current: HardcoverEdition, book: BookSyncData): boolean {
-    const wantAudio = this.localIsAudio(book.format);
+    const wantAudio = book.format != null && isAudioFormat(book.format);
     const candidateAligned = this.editionIsAudio(candidate) === wantAudio;
     const currentAligned = this.editionIsAudio(current) === wantAudio;
     if (candidateAligned !== currentAligned) return candidateAligned;
@@ -672,12 +719,13 @@ export class HardcoverBookMatchService {
   }
 
   private editionIsAudio(edition: HardcoverEdition): boolean {
-    return typeof edition.audio_seconds === 'number' && edition.audio_seconds > 0;
+    return edition.reading_format_id === AUDIOBOOK_READING_FORMAT_ID || this.normalizeEditionAudioSeconds(edition.audio_seconds) != null;
   }
 
-  private localIsAudio(format: string | null): boolean {
-    if (!format) return false;
-    return AUDIO_FORMATS.has(format.toLowerCase());
+  private supportsProgress(edition: HardcoverEdition, audio: boolean): boolean {
+    return audio
+      ? this.normalizeEditionAudioSeconds(edition.audio_seconds) != null
+      : !this.editionIsAudio(edition) && this.normalizeEditionPages(edition.pages) != null;
   }
 
   private normalizeEditionPages(pages: number | null | undefined): number | null {

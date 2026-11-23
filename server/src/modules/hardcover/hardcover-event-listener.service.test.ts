@@ -6,6 +6,7 @@ import {
   ACHIEVEMENT_EVENT_BOOK_RATING_CHANGED,
   ACHIEVEMENT_EVENT_BOOK_STATUS_CHANGED,
   ACHIEVEMENT_EVENT_READING_SESSION_SAVED,
+  AUDIOBOOK_PROGRESS_CHANGED_EVENT,
   AchievementEventsService,
 } from '../achievement/achievement-events.service';
 import { HardcoverAutoSyncSchedulerService } from './hardcover-auto-sync-scheduler.service';
@@ -86,6 +87,14 @@ describe('HardcoverEventListener', () => {
     expect(mockScheduler.requestSync).toHaveBeenNthCalledWith(1, { userId: 1, bookId: 1, reason: 'rating' });
     expect(mockScheduler.requestSync).toHaveBeenNthCalledWith(2, { userId: 1, bookId: 2, reason: 'rating' });
     expect(mockScheduler.requestSync).toHaveBeenNthCalledWith(3, { userId: 1, bookId: 3, reason: 'rating' });
+  });
+
+  it('schedules a playback sync even when the whole audiobook percentage is unchanged', () => {
+    const { events } = makeListener();
+
+    events.emit(AUDIOBOOK_PROGRESS_CHANGED_EVENT, { userId: 1, bookId: 10, wholePercentChanged: false });
+
+    expect(mockScheduler.requestSync).toHaveBeenCalledWith({ userId: 1, bookId: 10, reason: 'progress' });
   });
 
   it('propagates a hardcoverEditionId change to the user sync state', async () => {

@@ -1928,7 +1928,7 @@ export class BookRepository {
     currentFileId: number,
     positionSeconds: number,
     percentage: number,
-    sourceUpdatedAt = new Date(),
+    { sourceUpdatedAt = new Date(), mirroredFromEbook = false }: { sourceUpdatedAt?: Date; mirroredFromEbook?: boolean } = {},
   ) {
     const now = new Date();
     const [row] = await this.db
@@ -1940,6 +1940,7 @@ export class BookRepository {
         positionSeconds,
         percentage,
         capturedAt: sourceUpdatedAt,
+        mirroredFromEbook,
         operationId: null,
         manifestRevision: null,
         updatedAt: now,
@@ -1952,6 +1953,7 @@ export class BookRepository {
           percentage,
           revision: sql`${audiobookProgress.revision} + 1`,
           capturedAt: sourceUpdatedAt,
+          mirroredFromEbook,
           operationId: null,
           manifestRevision: null,
           updatedAt: now,

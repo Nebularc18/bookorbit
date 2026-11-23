@@ -50,6 +50,7 @@ export const hardcoverBookState = pgTable(
     lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
     lastSyncedStatus: varchar('last_synced_status', { length: 20 }),
     lastSyncedProgress: real('last_synced_progress'),
+    lastSyncedFormat: varchar('last_synced_format', { length: 20 }),
     lastSyncedRating: integer('last_synced_rating'),
     lastSyncedStartedAt: varchar('last_synced_started_at', { length: 10 }),
     lastSyncedFinishedAt: varchar('last_synced_finished_at', { length: 10 }),
