@@ -383,15 +383,18 @@ describe('BookCoverCard', () => {
       expect(mockRouterPush).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'reader' }))
     })
 
-    it('opens the audiobook directly from a dashboard cover tap despite the details preference', async () => {
-      setTouchMode(true)
-      mockThumbnailClickAction.value = 'details'
+    it.each([false, true])('separates dashboard details and playback with touch mode %s', async (touchMode) => {
+      setTouchMode(touchMode)
       const files = [makeFile({ id: 10, format: 'epub', role: 'primary' }), makeFile({ id: 11, format: 'm4b', role: 'content' })]
       const wrapper = mountCard({ book: makeBook({ files }), mediaKind: 'audiobook', quickOpen: 'listen' })
 
-      expect(wrapper.get('[data-testid="grid-card-primary-action"]').attributes('aria-label')).toBe('Continue listening')
+      const playButton = wrapper.get('[data-testid="grid-card-primary-action"]')
+      expect(playButton.attributes('aria-label')).toBe('Continue listening')
       await wrapper.find('.group').trigger('click')
+      expect(mockRouterPush).toHaveBeenCalledExactlyOnceWith({ name: 'book-detail', params: { bookId: 1 } })
 
+      mockRouterPush.mockClear()
+      await playButton.trigger('click')
       expect(mockRouterPush).toHaveBeenCalledExactlyOnceWith({ name: 'reader', params: { bookId: 1, fileId: 11 }, query: { format: 'm4b' } })
     })
 
