@@ -6,7 +6,10 @@ import type {
   ReadStatus,
 } from '@bookorbit/types';
 
+import { HARDCOVER_NON_RETRYABLE_SYNC_ERRORS, HARDCOVER_SYNC_RETRY_DELAYS_MS } from './hardcover.constants';
+
 const SYNCABLE_STATUSES = new Set<ReadStatus>(['want_to_read', 'reading', 'rereading', 'on_hold', 'read', 'skimmed', 'abandoned']);
+const NON_RETRYABLE_SYNC_ERRORS = new Set<string>(HARDCOVER_NON_RETRYABLE_SYNC_ERRORS);
 
 export interface HardcoverBookSyncPolicySettings {
   effectiveEnabled: boolean;
@@ -77,4 +80,33 @@ export function resolveHardcoverBookSyncDecision(input: {
   }
 
   return { syncEnabled: false, effectiveReason: 'not_selected' };
+}
+
+export function isRetryableHardcoverSyncError(syncError: string | null | undefined): boolean {
+  if (!syncError) return false;
+  if (NON_RETRYABLE_SYNC_ERRORS.has(syncError)) return false;
+  if (syncError.startsWith('no_status_mapping:')) return false;
+  return true;
+}
+
+export interface HardcoverRetrySchedule {
+  retryCount: number;
+  nextRetryAt: Date | null;
+}
+
+export function computeHardcoverRetrySchedule(error: string, currentRetryCount: number, now = new Date()): HardcoverRetrySchedule {
+  if (!isRetryableHardcoverSyncError(error)) {
+    return { retryCount: 0, nextRetryAt: null };
+  }
+
+  const retryCount = Math.max(0, currentRetryCount) + 1;
+  const delayMs = HARDCOVER_SYNC_RETRY_DELAYS_MS[retryCount - 1];
+  if (delayMs === undefined) {
+    return { retryCount, nextRetryAt: null };
+  }
+
+  return {
+    retryCount,
+    nextRetryAt: new Date(now.getTime() + delayMs),
+  };
 }

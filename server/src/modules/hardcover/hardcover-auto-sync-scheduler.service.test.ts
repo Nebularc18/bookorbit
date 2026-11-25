@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   HardcoverAutoSyncSchedulerService,
   HARDCOVER_AUTO_SYNC_DEBOUNCE_MS,
+  HARDCOVER_AUTO_SYNC_PROGRESS_DEBOUNCE_MS,
+  HARDCOVER_AUTO_SYNC_PROGRESS_MAX_WAIT_MS,
   type HardcoverAutoSyncReason,
 } from './hardcover-auto-sync-scheduler.service';
 import { HardcoverRepository } from './hardcover.repository';
@@ -137,10 +139,39 @@ describe('HardcoverAutoSyncSchedulerService', () => {
 
     expect(mockRepository.findBookIdByFileId).toHaveBeenCalledWith(5);
 
-    await advanceDebounce();
+    await advanceDebounce(HARDCOVER_AUTO_SYNC_PROGRESS_DEBOUNCE_MS);
 
     expect(mockSyncService.syncBook).toHaveBeenCalledTimes(1);
     expect(mockSyncService.syncBook).toHaveBeenCalledWith(1, 42);
+  });
+
+  it('coalesces frequent progress updates and flushes at max wait during continuous reading', async () => {
+    service.requestSync({ userId: 1, bookId: 10, reason: 'progress' });
+    await vi.advanceTimersByTimeAsync(HARDCOVER_AUTO_SYNC_DEBOUNCE_MS);
+    expect(mockSyncService.syncBook).not.toHaveBeenCalled();
+
+    // Emit progress every 30s (less than 60s idle debounce) up to max wait (5m).
+    for (let elapsed = 30_000; elapsed < HARDCOVER_AUTO_SYNC_PROGRESS_MAX_WAIT_MS; elapsed += 30_000) {
+      await vi.advanceTimersByTimeAsync(30_000 - (elapsed === 30_000 ? HARDCOVER_AUTO_SYNC_DEBOUNCE_MS : 0));
+      service.requestSync({ userId: 1, bookId: 10, reason: 'progress' });
+    }
+    expect(mockSyncService.syncBook).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mockSyncService.syncBook).toHaveBeenCalledTimes(1);
+    expect(mockSyncService.syncBook).toHaveBeenCalledWith(1, 10);
+  });
+
+  it('shortens a pending progress debounce immediately when a status change arrives', async () => {
+    service.requestSync({ userId: 1, bookId: 10, reason: 'progress' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(mockSyncService.syncBook).not.toHaveBeenCalled();
+
+    service.requestSync({ userId: 1, bookId: 10, reason: 'status' });
+    await advanceDebounce(HARDCOVER_AUTO_SYNC_DEBOUNCE_MS);
+
+    expect(mockSyncService.syncBook).toHaveBeenCalledTimes(1);
+    expect(mockSyncService.syncBook).toHaveBeenCalledWith(1, 10);
   });
 
   it.each([
@@ -151,7 +182,7 @@ describe('HardcoverAutoSyncSchedulerService', () => {
     mockSettingsService.getSettings.mockResolvedValue({ ...enabledSettings, ...settingsPatch });
 
     service.requestSync({ userId: 1, bookId: 10, reason: 'progress' });
-    await advanceDebounce();
+    await advanceDebounce(HARDCOVER_AUTO_SYNC_PROGRESS_DEBOUNCE_MS);
 
     expect(mockSyncService.syncBook).not.toHaveBeenCalled();
   });
@@ -161,7 +192,7 @@ describe('HardcoverAutoSyncSchedulerService', () => {
     mockSyncService.syncBook.mockReturnValueOnce(firstSync.promise).mockResolvedValueOnce(undefined);
 
     service.requestSync({ userId: 1, bookId: 10, reason: 'progress' });
-    await advanceDebounce();
+    await advanceDebounce(HARDCOVER_AUTO_SYNC_PROGRESS_DEBOUNCE_MS);
     expect(mockSyncService.syncBook).toHaveBeenCalledTimes(1);
 
     service.requestSync({ userId: 1, bookId: 10, reason: 'status' });
@@ -216,7 +247,7 @@ describe('HardcoverAutoSyncSchedulerService', () => {
     mockSyncService.syncBook.mockRejectedValue(new Error('API "bad"\nline'));
 
     service.requestSync({ userId: 1, bookId: 10, reason: 'progress' });
-    await advanceDebounce();
+    await advanceDebounce(HARDCOVER_AUTO_SYNC_PROGRESS_DEBOUNCE_MS);
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[hardcover.auto_sync] [fail] userId=1 bookId=10 reasons=progress'));
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('errorClass=Error error="API \\"bad\\" line"'));

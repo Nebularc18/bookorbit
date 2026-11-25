@@ -12,6 +12,7 @@ import { HardcoverEventListener } from './hardcover-event-listener.service';
 import { HardcoverImportService } from './hardcover-import.service';
 import { HardcoverQueueService } from './hardcover-queue.service';
 import { HardcoverRepository } from './hardcover.repository';
+import { HardcoverRetrySchedulerService } from './hardcover-retry-scheduler.service';
 import { HardcoverSettingsService } from './hardcover-settings.service';
 import { HardcoverSyncService } from './hardcover-sync.service';
 
@@ -27,6 +28,7 @@ import { HardcoverSyncService } from './hardcover-sync.service';
     HardcoverSyncService,
     HardcoverImportService,
     HardcoverAutoSyncSchedulerService,
+    HardcoverRetrySchedulerService,
     HardcoverEventListener,
   ],
   exports: [HardcoverSyncService, HardcoverSettingsService],

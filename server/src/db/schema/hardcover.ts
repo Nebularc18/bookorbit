@@ -55,6 +55,8 @@ export const hardcoverBookState = pgTable(
     lastSyncedStartedAt: varchar('last_synced_started_at', { length: 10 }),
     lastSyncedFinishedAt: varchar('last_synced_finished_at', { length: 10 }),
     syncError: text('sync_error'),
+    retryCount: integer('retry_count').notNull().default(0),
+    nextRetryAt: timestamp('next_retry_at', { withTimezone: true }),
     syncOverride: varchar('sync_override', { length: 20 }),
     syncExcluded: boolean('sync_excluded').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -63,7 +65,13 @@ export const hardcoverBookState = pgTable(
       .notNull()
       .$onUpdateFn(() => new Date()),
   },
-  (t) => [unique('hardcover_book_state_user_book_uidx').on(t.userId, t.bookId), index('hardcover_book_state_book_id_idx').on(t.bookId)],
+  (t) => [
+    unique('hardcover_book_state_user_book_uidx').on(t.userId, t.bookId),
+    index('hardcover_book_state_book_id_idx').on(t.bookId),
+    index('hardcover_book_state_retry_due_idx')
+      .on(t.nextRetryAt)
+      .where(sql`${t.syncError} is not null`),
+  ],
 );
 
 export type HardcoverUserSetting = typeof hardcoverUserSettings.$inferSelect;

@@ -6,6 +6,9 @@ import { HardcoverSettingsService } from './hardcover-settings.service';
 import { HardcoverSyncService } from './hardcover-sync.service';
 
 export const HARDCOVER_AUTO_SYNC_DEBOUNCE_MS = 1000;
+// Progress heartbeats fire frequently while reading or listening; coalesce them to avoid burning Hardcover's daily API quota.
+export const HARDCOVER_AUTO_SYNC_PROGRESS_DEBOUNCE_MS = 60_000;
+export const HARDCOVER_AUTO_SYNC_PROGRESS_MAX_WAIT_MS = 5 * 60_000;
 
 export type HardcoverAutoSyncReason = 'status' | 'progress' | 'rating';
 
@@ -30,6 +33,7 @@ interface AutoSyncState {
   reasons: Set<HardcoverAutoSyncReason>;
   timer: ReturnType<typeof setTimeout> | null;
   inFlight: boolean;
+  firstPendingAtMs: number | null;
 }
 
 const AUTO_SYNC_EVENT = 'hardcover.auto_sync';
@@ -49,6 +53,7 @@ export class HardcoverAutoSyncSchedulerService {
 
   requestSync(request: AutoSyncRequest): void {
     const state = this.getOrCreateState(request.userId, request.bookId);
+    if (state.reasons.size === 0) state.firstPendingAtMs = Date.now();
     state.reasons.add(request.reason);
 
     if (state.inFlight) return;
@@ -72,6 +77,7 @@ export class HardcoverAutoSyncSchedulerService {
       reasons: new Set(),
       timer: null,
       inFlight: false,
+      firstPendingAtMs: null,
     };
     this.states.set(key, state);
     return state;
@@ -80,10 +86,20 @@ export class HardcoverAutoSyncSchedulerService {
   private schedule(state: AutoSyncState): void {
     if (state.timer) clearTimeout(state.timer);
 
+    const delayMs = this.resolveDelayMs(state);
     state.timer = setTimeout(() => {
       state.timer = null;
       void this.runDueSync(state.key);
-    }, HARDCOVER_AUTO_SYNC_DEBOUNCE_MS);
+    }, delayMs);
+  }
+
+  private resolveDelayMs(state: AutoSyncState): number {
+    if (state.reasons.has('status') || state.reasons.has('rating')) {
+      return HARDCOVER_AUTO_SYNC_DEBOUNCE_MS;
+    }
+    const elapsedMs = state.firstPendingAtMs !== null ? Date.now() - state.firstPendingAtMs : 0;
+    const remainingMaxWaitMs = Math.max(0, HARDCOVER_AUTO_SYNC_PROGRESS_MAX_WAIT_MS - elapsedMs);
+    return Math.min(HARDCOVER_AUTO_SYNC_PROGRESS_DEBOUNCE_MS, remainingMaxWaitMs);
   }
 
   private async runDueSync(key: string): Promise<void> {
@@ -92,6 +108,7 @@ export class HardcoverAutoSyncSchedulerService {
 
     const reasons = new Set(state.reasons);
     state.reasons.clear();
+    state.firstPendingAtMs = null;
     state.inFlight = true;
 
     try {

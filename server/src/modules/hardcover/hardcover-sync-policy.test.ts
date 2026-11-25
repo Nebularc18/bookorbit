@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  computeHardcoverRetrySchedule,
+  isRetryableHardcoverSyncError,
   resolveHardcoverBookSyncDecision,
   resolveHardcoverBookSyncOverrideForToggle,
   normalizeHardcoverBookSyncOverride,
 } from './hardcover-sync-policy';
+import { HARDCOVER_SYNC_RETRY_DELAYS_MS } from './hardcover.constants';
 
 const baseSettings = {
   effectiveEnabled: true,
@@ -184,5 +187,41 @@ describe('hardcover-sync-policy', () => {
     expect(resolveHardcoverBookSyncOverrideForToggle('all_eligible', true, true)).toBe('included');
     expect(resolveHardcoverBookSyncOverrideForToggle('all_eligible', false, true)).toBeNull();
     expect(resolveHardcoverBookSyncOverrideForToggle('all_eligible', true, false)).toBeNull();
+  });
+
+  describe('retry policy', () => {
+    it('classifies transient sync errors as retryable and permanent ones as non-retryable', () => {
+      expect(isRetryableHardcoverSyncError('Hardcover API error: 500')).toBe(true);
+      expect(isRetryableHardcoverSyncError('Hardcover rate limit exceeded')).toBe(true);
+      expect(isRetryableHardcoverSyncError('fetch failed')).toBe(true);
+      expect(isRetryableHardcoverSyncError('missing_edition_pages')).toBe(true);
+
+      expect(isRetryableHardcoverSyncError(null)).toBe(false);
+      expect(isRetryableHardcoverSyncError(undefined)).toBe(false);
+      expect(isRetryableHardcoverSyncError('')).toBe(false);
+      expect(isRetryableHardcoverSyncError('no_match')).toBe(false);
+      expect(isRetryableHardcoverSyncError('no_status_mapping:custom')).toBe(false);
+      expect(isRetryableHardcoverSyncError('Hardcover API error: 401')).toBe(false);
+      expect(isRetryableHardcoverSyncError('Hardcover API error: 403')).toBe(false);
+    });
+
+    it('schedules exponential backoff across retries and stops once exhausted', () => {
+      const now = new Date('2026-11-25T00:00:00.000Z');
+      for (let i = 0; i < HARDCOVER_SYNC_RETRY_DELAYS_MS.length; i++) {
+        const schedule = computeHardcoverRetrySchedule('Hardcover API error: 503', i, now);
+        expect(schedule.retryCount).toBe(i + 1);
+        expect(schedule.nextRetryAt).toEqual(new Date(now.getTime() + HARDCOVER_SYNC_RETRY_DELAYS_MS[i]!));
+      }
+
+      const exhausted = computeHardcoverRetrySchedule('Hardcover API error: 503', HARDCOVER_SYNC_RETRY_DELAYS_MS.length, now);
+      expect(exhausted).toEqual({ retryCount: HARDCOVER_SYNC_RETRY_DELAYS_MS.length + 1, nextRetryAt: null });
+    });
+
+    it('does not schedule retries for non-retryable errors', () => {
+      expect(computeHardcoverRetrySchedule('Hardcover API error: 401', 0, new Date('2026-11-25T00:00:00.000Z'))).toEqual({
+        retryCount: 0,
+        nextRetryAt: null,
+      });
+    });
   });
 });

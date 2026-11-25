@@ -75,6 +75,9 @@ export class HardcoverSettingsService {
     if (payload.excludedLibraryIds !== undefined) data.excludedLibraryIds = [...new Set(payload.excludedLibraryIds)].sort((a, b) => a - b);
 
     await this.repo.upsertSettings(userId, data);
+    if (rawToken !== undefined && typeof this.repo.resetFailedBookRetriesForUser === 'function') {
+      await this.repo.resetFailedBookRetriesForUser(userId);
+    }
     return this.getSettings(userId);
   }
 

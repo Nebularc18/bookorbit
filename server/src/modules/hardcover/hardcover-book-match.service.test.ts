@@ -1085,4 +1085,41 @@ describe('HardcoverBookMatchService', () => {
       await expect(makeService().findEditionForBook(1, 'tok', 100, 200)).rejects.toThrow('Failed to load Hardcover editions');
     });
   });
+
+  describe('transient lookup failures and edition metrics caching', () => {
+    it('throws instead of storing permanent no_match when all lookups fail due to API errors', async () => {
+      mockRepo.findBookState.mockResolvedValue(undefined);
+      mockClient.query.mockRejectedValue(new Error('Hardcover API error: 503'));
+
+      await expect(makeService().matchBook(1, 'tok', baseBook)).rejects.toThrow('Hardcover book match lookup failed');
+      expect(mockRepo.upsertBookState).not.toHaveBeenCalledWith(expect.objectContaining({ matchError: 'no_match' }));
+    });
+
+    it('serves repeated cached edition metrics lookups from memory without extra API calls', async () => {
+      const book = { ...baseBook, format: 'epub', progress: 25 };
+      mockRepo.findBookState.mockResolvedValue({
+        hardcoverBookId: 100,
+        hardcoverEditionId: 200,
+        matchBasis: buildHardcoverMatchBasis(book),
+        matchError: null,
+      });
+      mockClient.query.mockResolvedValueOnce({
+        books: [{ id: 100, editions: [{ id: 200, pages: 412, reading_format_id: 4, audio_seconds: null }] }],
+      });
+
+      const service = makeService();
+      const first = await service.matchBook(1, 'tok', book);
+      const second = await service.matchBook(1, 'tok', { ...book, progress: 50 });
+
+      expect(first).toEqual({
+        hardcoverBookId: 100,
+        hardcoverEditionId: 200,
+        editionPages: 412,
+        editionAudioSeconds: null,
+        matchMethod: 'cached',
+      });
+      expect(second).toEqual(first);
+      expect(mockClient.query).toHaveBeenCalledTimes(1);
+    });
+  });
 });
