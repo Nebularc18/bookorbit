@@ -16,7 +16,7 @@ local logger = require("logger")
 local time = require("ui/time")
 local util = require("util")
 local T = require("ffi/util").template
-local _ = require("gettext")
+local _ = require("bookorbit_gettext")
 
 local BookOrbitStateManager = require("bookorbit_state_manager")
 local DeviceNames = require("bookorbit_device_names")
@@ -185,8 +185,31 @@ function ProgressSync:progressComparedSinceOpen()
     return compared ~= nil and compared == self:getDocumentDigest()
 end
 
+-- Outlives the plugin instance: a layout change makes KOReader rebuild the reader
+-- and with it this plugin, but the book and its reading session carry on.
+local carried_compared_digest
+
 function ProgressSync:noteProgressCompared(digest)
     self.progress_compared_digest = digest or self:getDocumentDigest()
+    carried_compared_digest = self.progress_compared_digest
+end
+
+-- Whether this reader is the open book rebuilt by a reload (rotation, font or
+-- margin change) whose place was already weighed against BookOrbit's. The new
+-- layout paginates differently, so percentages from before the reload no longer
+-- line up and a fresh open-time pull would move the reader about a page.
+-- Hands the weighed state to this instance when it is. `reloading` is the
+-- reader's own flag, which KOReader clears again right after ReaderReady.
+function ProgressSync:continuesReloadedBook(reloading)
+    local carried = carried_compared_digest
+    if not reloading then
+        carried_compared_digest = nil
+        return false
+    end
+    local digest = self:getDocumentDigest()
+    if not digest or digest ~= carried then return false end
+    self.progress_compared_digest = digest
+    return true
 end
 
 function ProgressSync:applyRemoteProgress(body, on_done)
@@ -330,7 +353,7 @@ function ProgressSync:updateProgress(ensure_networking, interactive, on_suspend)
     if interactive then
         if body then
             if self.recordSyncSuccess then
-                self:recordSyncSuccess("progress_push", _("Progress pushed"))
+                self:recordSyncSuccess("progress_push", require("bookorbit_activity").detail("progress_pushed"))
             end
             Toast.show(_("Progress sent to BookOrbit"))
             if not on_suspend then
@@ -353,7 +376,7 @@ function ProgressSync:updateProgress(ensure_networking, interactive, on_suspend)
         logger.dbg("BookOrbit: push failed:", err)
     elseif not on_suspend then
         if self.recordSyncSuccess then
-            self:recordSyncSuccess("progress_push", _("Progress pushed"))
+            self:recordSyncSuccess("progress_push", require("bookorbit_activity").detail("progress_pushed"))
         end
         if self.requestUpdateCheck then
             self:requestUpdateCheck(false, "progress_push")
@@ -459,7 +482,7 @@ function ProgressSync:getProgress(ensure_networking, interactive)
         self:noteProgressCompared(digest)
         self:syncToProgress(body.progress, body.percentage)
         if self.recordSyncSuccess then
-            self:recordSyncSuccess("progress_pull", _("Progress pulled"))
+            self:recordSyncSuccess("progress_pull", require("bookorbit_activity").detail("progress_pulled"))
         end
         showMoved(body)
         return
@@ -472,7 +495,7 @@ function ProgressSync:getProgress(ensure_networking, interactive)
             self:noteProgressCompared(digest)
             self:syncToProgress(body.progress, body.percentage)
             if self.recordSyncSuccess then
-                self:recordSyncSuccess("progress_pull", _("Progress pulled"))
+                self:recordSyncSuccess("progress_pull", require("bookorbit_activity").detail("progress_pulled"))
             end
             showMoved(body)
         end, function()
@@ -484,7 +507,7 @@ function ProgressSync:getProgress(ensure_networking, interactive)
     if strategy == SYNC_STRATEGY.SILENT then
         self:syncToProgress(body.progress, body.percentage)
         if self.recordSyncSuccess then
-            self:recordSyncSuccess("progress_pull", _("Progress pulled"))
+            self:recordSyncSuccess("progress_pull", require("bookorbit_activity").detail("progress_pulled"))
         end
         showMoved(body)
     end

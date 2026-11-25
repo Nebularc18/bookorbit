@@ -78,7 +78,7 @@ import { BookDockRepository, type BookDockFilter } from './book-dock.repository'
 import { BookDockDuplicateService, IDENTIFIER_MATCH_REASONS, type DuplicateMatch } from './book-dock-duplicate.service';
 import { BookDockKeptFilesService } from './book-dock-kept-files.service';
 import { BookDockDigestService } from './book-dock-digest.service';
-import { BookDockEventsService, BOOK_DOCK_FILE_INGESTED } from './book-dock-events.service';
+import { BookDockEventsService, BOOK_DOCK_FILE_INGESTED, type BookDockOwnedFileExitReport } from './book-dock-events.service';
 import { BookDockGateway } from './book-dock.gateway';
 import {
   BookDockJoinService,
@@ -173,6 +173,7 @@ type NormalizedFinalizeMetadata = {
   publisher: string | null;
   publishedDate: string | null;
   publishedYear: number | null;
+  originalPublishedYear: number | null;
   language: string | null;
   pageCount: number | null;
   seriesName: string | null;
@@ -400,9 +401,10 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
         });
         if (rows.length === 0) break;
 
+        const reportExit = await this.events.beforeOwnedFilesExit(rows);
         const prepared = await this.prepareFinalizeBatch(rows, defaultLibraryId, defaultFolderId, overrideMap, userId, isSuperuser, requester);
         for (const analysis of prepared.analyses) {
-          const result = await this.finalizePreparedCandidate(analysis, prepared.existingDestinations);
+          const result = await this.fileForPerson(analysis, prepared.existingDestinations, reportExit);
           results.push(result);
           if (result.success) succeeded++;
           else failed++;
@@ -414,6 +416,7 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
       for (let i = 0; i < ids.length; i += BATCH_SIZE) {
         const batch = ids.slice(i, i + BATCH_SIZE);
         const rows = await this.repo.findByIds(batch, userId, canManageAll);
+        const reportExit = await this.events.beforeOwnedFilesExit(rows);
         const prepared = await this.prepareFinalizeBatch(rows, defaultLibraryId, defaultFolderId, overrideMap, userId, isSuperuser, requester);
         const analysisById = new Map(prepared.analyses.map((analysis) => [analysis.fileId, analysis]));
 
@@ -430,7 +433,7 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
             continue;
           }
 
-          const result = await this.finalizePreparedCandidate(analysis, prepared.existingDestinations);
+          const result = await this.fileForPerson(analysis, prepared.existingDestinations, reportExit);
           results.push(result);
           if (result.success) succeeded++;
           else failed++;
@@ -451,6 +454,21 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
       .catch(() => {});
 
     return { total: results.length, succeeded, failed, results };
+  }
+
+  /**
+   * A person's filing, which a module that owns the file has to hear about. Auto-file and
+   * `finalizeManagedFile` never report: auto-file skips owned files, and the owner's own filing
+   * already knows how it ended.
+   */
+  private async fileForPerson(
+    analysis: FinalizeCandidateAnalysis,
+    existingDestinations: Map<string, number>,
+    reportExit: BookDockOwnedFileExitReport,
+  ): Promise<BookDockFinalizeFileResult> {
+    const result = await this.finalizePreparedCandidate(analysis, existingDestinations);
+    if (result.success && result.bookId !== undefined) await reportExit(result.fileId, { kind: 'filed', bookId: result.bookId });
+    return result;
   }
 
   private async finalizeFile(
@@ -683,6 +701,7 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
 
           if (duplicateRows.length === 0) return;
 
+          const reportExit = await this.events.beforeOwnedFilesExit(duplicateRows);
           const keepsOriginals = await this.keptFiles.keepOriginalCheck();
           for (const row of duplicateRows) {
             await this.cleanupDiscardedBookDockFile(row, await keepsOriginals(row));
@@ -690,6 +709,7 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
           }
           await this.repo.deleteByIds(duplicateRows.map((row) => row.id));
           discarded += duplicateRows.length;
+          for (const row of duplicateRows) await reportExit(row.id, { kind: 'discarded' });
         },
       );
 
@@ -1598,7 +1618,11 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
     mediaOverlayAvailable = false,
   ): Record<string, string> {
     return buildPatternTokens({
-      metadata: meta,
+      metadata: {
+        ...meta,
+        originalPublishedYear: normalizePublishedYear(meta.originalPublishedYear),
+        seriesMemberships: finalizeSeriesMemberships(meta.seriesMemberships, meta.seriesName ?? null, meta.seriesIndex ?? null),
+      },
       authors: meta.authors,
       narrators: meta.narrators,
       originalStem: basename(fileName, extname(fileName)),
@@ -1764,6 +1788,7 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
       publisher: meta.publisher ?? null,
       publishedDate: meta.publishedDate ?? null,
       publishedYear: meta.publishedYear ?? null,
+      originalPublishedYear: meta.originalPublishedYear ?? undefined,
       language: meta.language ?? null,
       seriesName: meta.seriesName ?? null,
       seriesIndex: meta.seriesIndex ?? null,
@@ -2017,6 +2042,7 @@ function normalizeFinalizeMetadata(meta: BookDockMetadata | null | undefined): N
     publisher: normalizeText(normalizedMeta?.publisher, 500),
     publishedDate,
     publishedYear: publishedDate ? publishedYearFromDateKey(publishedDate) : normalizePublishedYear(normalizedMeta?.publishedYear),
+    originalPublishedYear: normalizePublishedYear(normalizedMeta?.originalPublishedYear),
     language: normalizeLanguage(normalizedMeta?.language),
     pageCount: normalizeInteger(normalizedMeta?.pageCount),
     seriesName,
@@ -2038,7 +2064,7 @@ function normalizeFinalizeMetadata(meta: BookDockMetadata | null | undefined): N
     ranobedbId: normalizeText(normalizedMeta?.ranobedbId, 50),
     lubimyczytacId: normalizeText(normalizedMeta?.lubimyczytacId, 512),
     aladinId: normalizeText(normalizedMeta?.aladinId, 20),
-    seriesMemberships: withPrimarySeries(normalizeSeriesMemberships(normalizedMeta?.seriesMemberships), seriesName, seriesIndex),
+    seriesMemberships: finalizeSeriesMemberships(normalizedMeta?.seriesMemberships, seriesName, seriesIndex),
     communityRatings: normalizeCommunityRatings(normalizedMeta?.communityRatings),
     externalProviderIds: normalizedMeta?.externalProviderIds ?? undefined,
     comicMetadata: normalizeComicMetadata(normalizedMeta?.comicMetadata),
@@ -2067,11 +2093,12 @@ function normalizeSeriesMemberships(value: BookDockMetadata['seriesMemberships']
  * the series name and number. The form's values replace that entry, so a corrected series is filed
  * instead of the provider's spelling.
  */
-function withPrimarySeries(
-  memberships: MetadataSeriesMembership[] | undefined,
+function finalizeSeriesMemberships(
+  value: BookDockMetadata['seriesMemberships'],
   seriesName: string | null,
   seriesIndex: string | null,
 ): MetadataSeriesMembership[] | undefined {
+  const memberships = normalizeSeriesMemberships(value);
   if (memberships === undefined || !seriesName) return memberships;
   const key = seriesName.toLowerCase();
   const others = memberships.slice(1).filter((membership) => membership.seriesName.toLowerCase() !== key);

@@ -10,6 +10,7 @@ import {
 import { access } from 'fs/promises';
 import { basename } from 'path';
 import {
+  canonicalizeBookRequestIsbn,
   DEFAULT_BOOK_REQUEST_AUTOMATION_SETTINGS,
   isBookRequestMediaKind,
   NotificationType,
@@ -37,8 +38,9 @@ import {
 import { mainTitlePart, symmetricTitleSimilarity } from '../../../common/text-match/title-match';
 import type { RequestUser } from '../../../common/types/request-user';
 import { sanitizeLogValue } from '../../../common/utils/log-sanitize.utils';
+import { parsePublishedYear } from '../../../common/utils/published-date.utils';
 import type { BookDockFileRow, BookRequestDownloadRow, BookRequestRow } from '../../../db/schema';
-import { BookDockEventsService, BOOK_DOCK_FILE_INGESTED } from '../../book-dock/book-dock-events.service';
+import { BookDockEventsService, BOOK_DOCK_FILE_INGESTED, type BookDockOwnedFileExitReport } from '../../book-dock/book-dock-events.service';
 import { BookDockFinalizeService } from '../../book-dock/book-dock-finalize.service';
 import { BookDockRepository } from '../../book-dock/book-dock.repository';
 import { BookDockService } from '../../book-dock/book-dock.service';
@@ -66,8 +68,18 @@ const DEFAULT_VERIFICATION_THRESHOLD = DEFAULT_BOOK_REQUEST_AUTOMATION_SETTINGS.
 /** Prose for the stored reason and the notification. The drawer reads `heldOnRequest` instead. */
 const HELD_ON_REQUEST_REASON = 'the release was sent to be reviewed before it is filed';
 
+/** Stored on the request and the attempt, whether the discard came from the request or the Book Dock. */
+const HELD_IMPORT_DISCARDED_REASON = 'The imported file was discarded during review';
+
 const TITLE_WEIGHT = 0.7;
 const AUTHOR_WEIGHT = 0.3;
+
+/**
+ * How many years older than the requested edition an ebook has to say it is, while stating a
+ * different ISBN, before it is held as another edition. Providers and publishers disagree by a year
+ * or two about when one printing came out, which is not worth sending anyone to look at.
+ */
+const EDITION_YEAR_GAP = 3;
 
 /**
  * The two statuses a finished import may be filed from: the automatic path arrives at `importing`,
@@ -123,6 +135,7 @@ export class RequestVerificationService implements OnModuleInit {
         this.logger.error(`[book_request.verify] [fail] dockFileId=${fileId} error="${message}" - verification handler failed`);
       });
     });
+    this.events.onOwnedFileExit((fileIds) => this.watchHeldFiles(fileIds));
   }
 
   private async handleIngested(fileId: number): Promise<void> {
@@ -337,8 +350,8 @@ export class RequestVerificationService implements OnModuleInit {
     const heldOnRequest = download?.holdForReview ?? false;
     const releaseInfoUrl = download?.releaseInfoUrl ?? null;
 
-    // Filing or discarding the entry by hand empties both pointers to it, which leaves the request
-    // held over a file that is not there any more. Saying so is the only useful thing left.
+    // A dock file deleted from disk empties both pointers to it, which leaves the request held over
+    // a file that is not there any more. Saying so is the only useful thing left.
     if (!row) {
       return {
         requestId,
@@ -452,7 +465,7 @@ export class RequestVerificationService implements OnModuleInit {
    */
   async discardHeldImport(requestId: number, user: RequestUser): Promise<void> {
     const { request, download, fileId } = await this.loadHeld(requestId);
-    const reason = 'The imported file was discarded during review';
+    const reason = HELD_IMPORT_DISCARDED_REASON;
     const startedAt = Date.now();
 
     const claimed = await this.requests.updateIf(requestId, ['needs_review'], {
@@ -513,21 +526,119 @@ export class RequestVerificationService implements OnModuleInit {
     this.logger.log(
       `[book_request.discard_import] [end] requestId=${requestId} dockFileId=${fileId ?? 'none'} downloadId=${download?.id ?? 'none'} userId=${user.id} durationMs=${Date.now() - startedAt} title="${sanitizeLogValue(request.title)}" - a held import was discarded`,
     );
+    await this.notifyDiscarded(request, download?.id ?? null, fileId);
+    this.gateway.emitChanged();
+  }
+
+  /**
+   * A person can answer a hold from the Book Dock as well as from the request, by filing the held
+   * file there or discarding it. The request waits on that file, so it settles the way the
+   * request's own File or Discard would have; left alone it would sit in review over a file that
+   * is gone.
+   *
+   * Read before the dock acts, because removing the dock row empties the columns that tie the hold
+   * to it. The request's own File never reaches here, and its Discard settles the hold before it
+   * touches the dock, so neither is settled twice.
+   */
+  private async watchHeldFiles(fileIds: number[]): Promise<BookDockOwnedFileExitReport> {
+    const held = new Map((await this.downloads.findHeldOverDockFiles(fileIds)).map((row) => [row.fileId, row]));
+    return async (fileId, exit) => {
+      const row = held.get(fileId);
+      if (!row) return;
+      held.delete(fileId);
+      if (exit.kind === 'filed') await this.settleFiledInDock(row.request, row.download, fileId, exit.bookId);
+      else await this.settleDiscardedInDock(row.request, row.download, fileId);
+    };
+  }
+
+  private async settleFiledInDock(request: BookRequestRow, download: BookRequestDownloadRow, fileId: number, bookId: number): Promise<void> {
+    // Conditional, like every write in the pipeline: somebody may have answered the hold on the
+    // request while the dock was filing, and that answer stands.
+    const filed = await this.requests.updateIf(request.id, ['needs_review'], {
+      status: 'available',
+      matchedBookId: bookId,
+      bookDockFileId: null,
+      statusReason: null,
+    });
+    if (!filed) {
+      this.logger.log(
+        `[book_request.dock_filed] [end] requestId=${request.id} dockFileId=${fileId} bookId=${bookId} - the request left review before its held file was filed in the Library Dock, so it was left alone`,
+      );
+      return;
+    }
+
+    try {
+      if (!(await this.downloads.updateIf(download.id, ['needs_review'], { status: 'imported', importedAt: new Date() }))) {
+        this.logger.warn(
+          `[book_request.dock_filed] [fail] requestId=${request.id} downloadId=${download.id} - the attempt left review while its file was filed in the Library Dock, so it keeps the outcome it reached`,
+        );
+      }
+      this.logger.log(
+        `[book_request.dock_filed] [end] requestId=${request.id} downloadId=${download.id} dockFileId=${fileId} bookId=${bookId} - a held import was filed from the Library Dock, so its request is available`,
+      );
+      await this.notifier.notifyBookAvailable(request.id, bookId, {
+        title: 'Your requested book is available',
+        message: `"${request.title}" is ready`,
+        meta: { requestId: request.id, bookId },
+      });
+      await this.companions.handOn(request, bookId);
+    } finally {
+      this.gateway.emitChanged();
+    }
+  }
+
+  private async settleDiscardedInDock(request: BookRequestRow, download: BookRequestDownloadRow, fileId: number): Promise<void> {
+    const claimed = await this.requests.updateIf(request.id, ['needs_review'], {
+      status: 'failed',
+      statusReason: HELD_IMPORT_DISCARDED_REASON,
+      failureCode: null,
+      failureMeta: null,
+    });
+    if (!claimed) {
+      this.logger.log(
+        `[book_request.dock_discarded] [end] requestId=${request.id} dockFileId=${fileId} - the request left review before its held file was discarded in the Library Dock, so it was left alone`,
+      );
+      return;
+    }
+
+    try {
+      // Unlike a discard from the request, nothing is put back when the attempt has moved on: the
+      // file is already gone, and a request returned to review would be waiting on nothing.
+      const claimedDownload = await this.downloads.updateIf(download.id, ['needs_review'], {
+        status: 'failed',
+        errorMessage: HELD_IMPORT_DISCARDED_REASON,
+        failureCode: 'discarded',
+      });
+      if (!claimedDownload) {
+        this.logger.warn(
+          `[book_request.dock_discarded] [fail] requestId=${request.id} downloadId=${download.id} - the attempt left review while its file was discarded in the Library Dock, so it keeps the outcome it reached`,
+        );
+      }
+      this.logger.log(
+        `[book_request.dock_discarded] [end] requestId=${request.id} downloadId=${download.id} dockFileId=${fileId} - a held import was discarded from the Library Dock, so its request failed`,
+      );
+      await this.notifyDiscarded(request, download.id, fileId);
+    } finally {
+      this.gateway.emitChanged();
+    }
+  }
+
+  private async notifyDiscarded(request: BookRequestRow, downloadId: number | null, fileId: number | null): Promise<void> {
     await this.notifier.notifyResponsible(request, NotificationType.BookRequestFailed, {
       title: 'Book request import discarded',
-      message: `"${request.title}": ${reason}`,
+      message: `"${request.title}": ${HELD_IMPORT_DISCARDED_REASON}`,
       actionUrl: '/requests',
-      meta: { requestId, downloadId: download?.id ?? null, dockFileId: fileId },
+      meta: { requestId: request.id, downloadId, dockFileId: fileId },
     });
-    this.gateway.emitChanged();
   }
 
   /**
    * The one place that decides a request is genuinely sitting in the dock waiting on a person.
    *
    * The dock file is looked up through the request first and the attempt second, and may still
-   * come back null: both columns reference `book_dock_files` with `on delete set null`, so filing
-   * or discarding the entry by hand empties them together and the hold outlives its file.
+   * come back null: both columns reference `book_dock_files` with `on delete set null`. Filing or
+   * discarding the entry in the dock settles the hold (`watchHeldFiles`), but a file deleted from
+   * disk empties them together without saying how it went, and the hold outlives its file.
    */
   private async loadHeld(requestId: number): Promise<{ request: BookRequestRow; download: BookRequestDownloadRow | null; fileId: number | null }> {
     const joined = await this.requests.findById(requestId);
@@ -552,16 +663,20 @@ export class RequestVerificationService implements OnModuleInit {
 }
 
 /**
- * ISBN13 agreement is decisive when both sides carry one. A mismatch is not, because a different
- * edition of the same work has a different ISBN and is still the right book, so it falls through
- * to the title and author comparison rather than failing outright.
+ * ISBN13 agreement is decisive when both sides carry one. A mismatch alone is not, because an ISBN
+ * names one format of one edition and a request's is often just the one a provider listed first, so
+ * it falls through to the title and author comparison rather than failing outright. The exception
+ * is a file that also says it is years older than the requested edition: see `findOlderEdition`.
  *
  * Every path returns the field-by-field comparison as well as the number, because a bare score is
  * unactionable: an approver deciding whether to file this anyway needs to see that the title
  * gained a "Book 1 (Unabridged)" suffix, not that something somewhere came to 65.
  */
 export function verifyAgainstRequest(
-  request: Pick<BookRequestRow, 'title' | 'subtitle' | 'authors' | 'seriesName' | 'seriesIndex' | 'isbn13'>,
+  request: Pick<
+    BookRequestRow,
+    'title' | 'subtitle' | 'authors' | 'seriesName' | 'seriesIndex' | 'isbn10' | 'isbn13' | 'publishedYear' | 'mediaKind'
+  >,
   fetched: BookDockMetadata | null,
   embedded: BookDockMetadata | null,
   threshold: number = DEFAULT_VERIFICATION_THRESHOLD,
@@ -580,7 +695,7 @@ export function verifyAgainstRequest(
   const titleScore = importedTitle ? bestTitleSimilarity(request.title, request.subtitle, importedTitle) : 0;
   const authorScore = requestedAuthors.length && importedAuthors.length ? bestPairSimilarity(requestedAuthors, importedAuthors) : null;
 
-  const rows = (isbnVerdict: BookRequestVerificationVerdict): BookRequestVerificationRow[] => [
+  const rows = (isbnVerdict: BookRequestVerificationVerdict, olderEdition: OlderEdition | null = null): BookRequestVerificationRow[] => [
     {
       field: 'title',
       requested: joinTitle(request.title, request.subtitle),
@@ -596,6 +711,18 @@ export function verifyAgainstRequest(
     // The normalizer answers '' rather than null for a missing ISBN, and an empty row would
     // read as a blank value rather than as a field neither side filled in.
     { field: 'isbn13', requested: requestedIsbn || null, imported: importedIsbn || null, verdict: isbnVerdict },
+    // Shown only when it is what held the import: elsewhere a year is not compared, and a row
+    // that never affects the outcome would invite approvers to read it as if it did.
+    ...(olderEdition
+      ? [
+          {
+            field: 'year' as const,
+            requested: String(olderEdition.requestedYear),
+            imported: String(olderEdition.importedYear),
+            verdict: 'mismatch' as const,
+          },
+        ]
+      : []),
   ];
 
   if (requestedIsbn && importedIsbn && requestedIsbn === importedIsbn) {
@@ -635,6 +762,19 @@ export function verifyAgainstRequest(
   const score = Math.round(combined * 100);
   const passed = score >= threshold;
 
+  // Looked for only once the file would otherwise be filed, so it can add a hold and never changes
+  // why an import that already failed did.
+  const olderEdition = passed ? findOlderEdition(request, fetched, embedded) : null;
+  if (olderEdition) {
+    return {
+      score: 0,
+      passed: false,
+      reason: `the file is from ${olderEdition.importedYear}, ${olderEdition.requestedYear - olderEdition.importedYear} years before the ${olderEdition.requestedYear} edition that was requested, and carries a different ISBN`,
+      code: 'edition_mismatch',
+      rows: rows('mismatch', olderEdition),
+    };
+  }
+
   return {
     score,
     passed,
@@ -644,6 +784,55 @@ export function verifyAgainstRequest(
     code: passed ? 'above_threshold' : 'below_threshold',
     rows: rows(isbnVerdict),
   };
+}
+
+interface OlderEdition {
+  requestedYear: number;
+  importedYear: number;
+}
+
+/**
+ * The one case where a different ISBN counts against an import: an ebook whose own metadata names
+ * an ISBN other than the requested one and a year at least `EDITION_YEAR_GAP` years before the
+ * requested edition's. A request for a textbook's third edition that receives its first is the
+ * case; both editions share a title and an author, so nothing else in the score can tell them apart.
+ *
+ * Neither signal is enough alone. An ISBN names one format of one edition, so an epub rarely
+ * carries the print ISBN a request holds, and a year drifts with each provider's idea of "published".
+ *
+ * The limits are each there to keep a correct import from being held:
+ * - The evidence is the file's own metadata. A provider's match is a guess at the edition, so it can
+ *   only clear an import, never convict one. A file that states no ISBN or year, and a request that
+ *   names no edition (no ISBN, or no year), keep being judged on title and author.
+ * - Only a file older than the request. Providers often report a work's first publication year, so a
+ *   newer file is the ordinary case rather than a different edition.
+ * - Only ebooks. An audiobook's ISBN and date describe a recording, and its tags are rarely trustworthy.
+ * - Only the request's own ISBN clears an import. The other ISBNs a request carries come from every
+ *   edition its search results grouped together, so one of them proves nothing about this one.
+ */
+function findOlderEdition(
+  request: Pick<BookRequestRow, 'isbn10' | 'isbn13' | 'publishedYear' | 'mediaKind'>,
+  fetched: BookDockMetadata | null,
+  embedded: BookDockMetadata | null,
+): OlderEdition | null {
+  if (request.mediaKind !== 'ebook') return null;
+
+  const requestedIsbn = canonicalizeBookRequestIsbn(request.isbn10, request.isbn13);
+  const requestedYear = parsePublishedYear(request.publishedYear);
+  const embeddedIsbn = canonicalizeBookRequestIsbn(embedded?.isbn10, embedded?.isbn13);
+  const embeddedYear = statedYear(embedded);
+  if (requestedIsbn === null || requestedYear === undefined || embeddedIsbn === null || embeddedYear === null) return null;
+
+  if (embeddedIsbn === requestedIsbn || canonicalizeBookRequestIsbn(fetched?.isbn10, fetched?.isbn13) === requestedIsbn) return null;
+
+  // The newest year any source states, so a provider that places the file in the requested era
+  // outweighs a file that says otherwise.
+  const importedYear = Math.max(embeddedYear, statedYear(fetched) ?? embeddedYear);
+  return requestedYear - importedYear >= EDITION_YEAR_GAP ? { requestedYear, importedYear } : null;
+}
+
+function statedYear(metadata: BookDockMetadata | null): number | null {
+  return parsePublishedYear(metadata?.publishedYear) ?? parsePublishedYear(metadata?.publishedDate) ?? null;
 }
 
 function resolveImportedSeriesIndex(

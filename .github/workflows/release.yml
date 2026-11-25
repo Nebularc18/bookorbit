@@ -23,7 +23,6 @@ permissions: read-all
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   NODE_VERSION: "26"
-  PNPM_VERSION: "11"
 
 jobs:
   release-dry-run:
@@ -45,7 +44,6 @@ jobs:
         uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Semantic release dry run
         env:
@@ -103,11 +101,18 @@ jobs:
           fi
           echo "CI verification passed: ${success_count} successful run(s) found."
 
+      - name: Verify the KOReader plugin version moved with its changes
+        shell: bash
+        run: |
+          previous_tag=$(git describe --tags --abbrev=0 --match 'nebularc-v*' HEAD 2>/dev/null || true)
+          if [[ -n "$previous_tag" ]]; then
+            node scripts/koreader/check-plugin-version.mjs "$previous_tag"
+          fi
+
       - name: Set up Node.js and pnpm
         uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Run semantic-release
         id: semantic
