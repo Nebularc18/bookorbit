@@ -1156,6 +1156,13 @@
       "when": 1795566367043,
       "tag": "0165_hardcover_sync_retry",
       "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 1795631679251,
+      "tag": "0166_add_book_editions",
+      "breakpoints": true
     }
   ]
 }

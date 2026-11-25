@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   routerPush: vi.fn<(to: unknown) => Promise<void>>(),
   routerBack: vi.fn<() => void>(),
   fetchLibraries: vi.fn<() => Promise<void>>(),
+  refreshLibraries: vi.fn<() => Promise<void>>(),
   loadAuthor: vi.fn<() => Promise<void>>(),
   loadBooks: vi.fn<(reset?: boolean) => Promise<void>>(),
   loadMetadataPreview: vi.fn<() => Promise<void>>(),
@@ -70,7 +71,7 @@ vi.mock('@/composables/useDisplaySettings', () => ({
 }))
 
 vi.mock('@/features/library/composables/useLibraries', () => ({
-  useLibraries: () => ({ libraries: ref([]), fetchLibraries: mocks.fetchLibraries }),
+  useLibraries: () => ({ libraries: ref([]), fetchLibraries: mocks.fetchLibraries, refreshLibraries: mocks.refreshLibraries }),
 }))
 
 vi.mock('@/features/library/composables/useLibraryPermissions', () => ({
@@ -246,6 +247,7 @@ describe('AuthorDetailView', () => {
     mocks.route.query = {}
     mocks.routerPush.mockResolvedValue()
     mocks.fetchLibraries.mockResolvedValue()
+    mocks.refreshLibraries.mockResolvedValue()
     mocks.loadAuthor.mockResolvedValue()
     mocks.loadBooks.mockResolvedValue()
     mocks.loadMetadataPreview.mockResolvedValue()
@@ -348,6 +350,7 @@ describe('AuthorDetailView', () => {
 
     it('counts books rather than rows in the all-loaded label', async () => {
       // 2 collapsed rows standing for 200 books: the reader should be told about the books.
+      mocks.collapsePreference = true
       mocks.total = ref(2)
       mocks.bookTotal = ref(200)
       mocks.hasMore = ref(false)
@@ -355,6 +358,18 @@ describe('AuthorDetailView', () => {
       const wrapper = await mountView()
 
       expect(wrapper.text()).toContain(i18n.global.t('author.detail.books.allLoaded', { total: '200' }))
+    })
+
+    it('counts folded editions once in the all-loaded label', async () => {
+      // One work with five editions, folded into one card: the header says 1, so does the footer.
+      mocks.total = ref(1)
+      mocks.bookTotal = ref(5)
+      mocks.hasMore = ref(false)
+
+      const wrapper = await mountView()
+
+      expect(wrapper.text()).toContain(i18n.global.t('author.detail.books.allLoaded', { total: '1' }))
+      expect(wrapper.text()).not.toContain(i18n.global.t('author.detail.books.allLoaded', { total: '5' }))
     })
   })
 
@@ -541,6 +556,7 @@ describe('AuthorDetailView', () => {
     expect(mocks.books.value.map((book) => book.id)).toEqual([102])
     expect(mocks.total.value).toBe(1)
     expect(mocks.author.value?.bookCount).toBe(1)
+    expect(mocks.refreshLibraries).toHaveBeenCalledTimes(1)
 
     dialog = wrapper.getComponent(DeleteBookDialogStub)
     expect(dialog.props('open')).toBe(false)

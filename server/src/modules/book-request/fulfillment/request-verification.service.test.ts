@@ -1,7 +1,8 @@
 import { NotFoundException } from '@nestjs/common';
 import { NotificationType, type BookDockMetadata } from '@bookorbit/types';
 
-import type { BookRequestDownloadRow } from '../../../db/schema';
+import type { BookRequestDownloadRow, BookRequestRow } from '../../../db/schema';
+import type { BookDockOwnedFileExitHandler } from '../../book-dock/book-dock-events.service';
 import { UploadValidatorService } from '../../upload/upload-validator.service';
 import { RequestVerificationService, verifyAgainstRequest } from './request-verification.service';
 
@@ -129,6 +130,138 @@ describe('verifyAgainstRequest', () => {
 });
 
 /**
+ * The case a title and an author cannot catch: two editions of one work agree on both. A request for
+ * the third edition of a textbook that receives its first carries the same title and author, and
+ * only the ISBN and the year can tell them apart.
+ */
+describe('verifyAgainstRequest against an older edition of the requested work', () => {
+  const THIRD_EDITION_ISBN = '9781324072553';
+  const FIRST_EDITION_ISBN = '9780393923599';
+
+  function ebookRequest(overrides: Partial<RequestSnapshot> = {}): RequestSnapshot {
+    return request({
+      title: 'An Introduction to Moral Philosophy',
+      authors: ['Jonathan Wolff'],
+      mediaKind: 'ebook',
+      isbn13: THIRD_EDITION_ISBN,
+      publishedYear: 2025,
+      ...overrides,
+    });
+  }
+
+  function file(overrides: Partial<BookDockMetadata> = {}): BookDockMetadata {
+    return metadata({
+      title: 'An Introduction to Moral Philosophy',
+      authors: ['Jonathan Wolff'],
+      isbn13: FIRST_EDITION_ISBN,
+      publishedYear: 2017,
+      ...overrides,
+    });
+  }
+
+  const yearRow = (outcome: ReturnType<typeof verifyAgainstRequest>) => outcome.rows.find((row) => row.field === 'year');
+
+  it('holds the first edition requested as the third, however well the title and author score', () => {
+    const outcome = verifyAgainstRequest(ebookRequest(), null, file());
+
+    expect(outcome).toMatchObject({ passed: false, score: 0, code: 'edition_mismatch' });
+    expect(outcome.reason).toContain('8 years before the 2025 edition');
+    expect(outcome.rows.find((row) => row.field === 'isbn13')).toMatchObject({ requested: THIRD_EDITION_ISBN, verdict: 'mismatch' });
+    expect(yearRow(outcome)).toEqual({ field: 'year', requested: '2025', imported: '2017', verdict: 'mismatch' });
+  });
+
+  it('holds on the gap itself and files one year short of it', () => {
+    expect(verifyAgainstRequest(ebookRequest(), null, file({ publishedYear: 2022 }))).toMatchObject({ passed: false, code: 'edition_mismatch' });
+    expect(verifyAgainstRequest(ebookRequest(), null, file({ publishedYear: 2023 }))).toMatchObject({ passed: true, code: 'above_threshold' });
+  });
+
+  it('reads the year from a published date when the file states no bare year', () => {
+    const outcome = verifyAgainstRequest(ebookRequest(), null, file({ publishedYear: null, publishedDate: '2017-08-01' }));
+
+    expect(outcome).toMatchObject({ passed: false, code: 'edition_mismatch' });
+  });
+
+  it('files a file that is newer than the request, which is how a first-publication year looks', () => {
+    const outcome = verifyAgainstRequest(ebookRequest({ publishedYear: 1965 }), null, file({ publishedYear: 2019 }));
+
+    expect(outcome).toMatchObject({ passed: true, code: 'above_threshold' });
+    expect(yearRow(outcome)).toBeUndefined();
+  });
+
+  it('files the same edition when the epub spells the requested ISBN as an ISBN-10', () => {
+    const outcome = verifyAgainstRequest(
+      ebookRequest({ isbn13: '9780441013593', publishedYear: 2019 }),
+      null,
+      file({ isbn13: null, isbn10: '0441013597', publishedYear: 2005 }),
+    );
+
+    expect(outcome.passed).toBe(true);
+  });
+
+  it('files an audiobook, whose ISBN and date describe a recording rather than an edition of the text', () => {
+    const outcome = verifyAgainstRequest(ebookRequest({ mediaKind: 'audiobook' }), null, file());
+
+    expect(outcome.passed).toBe(true);
+  });
+
+  it('judges a request that names no edition on title and author alone', () => {
+    expect(verifyAgainstRequest(ebookRequest({ isbn13: null }), null, file()).passed).toBe(true);
+    expect(verifyAgainstRequest(ebookRequest({ publishedYear: null }), null, file()).passed).toBe(true);
+  });
+
+  it('judges a file that states no ISBN or no year of its own on title and author alone', () => {
+    expect(verifyAgainstRequest(ebookRequest(), null, file({ isbn13: null })).passed).toBe(true);
+    expect(verifyAgainstRequest(ebookRequest(), null, file({ publishedYear: null })).passed).toBe(true);
+  });
+
+  it('does not let a provider match convict a file whose own metadata says nothing', () => {
+    const guess = metadata({
+      title: 'An Introduction to Moral Philosophy',
+      authors: ['Jonathan Wolff'],
+      isbn13: FIRST_EDITION_ISBN,
+      publishedYear: 2017,
+    });
+    const outcome = verifyAgainstRequest(
+      ebookRequest(),
+      guess,
+      metadata({ title: 'An Introduction to Moral Philosophy', authors: ['Jonathan Wolff'] }),
+    );
+
+    expect(outcome.passed).toBe(true);
+  });
+
+  it('files a file whose own ISBN is foreign when the provider matched it to the requested edition', () => {
+    const matched = metadata({
+      title: 'An Introduction to Moral Philosophy',
+      authors: ['Jonathan Wolff'],
+      isbn13: THIRD_EDITION_ISBN,
+      publishedYear: 2025,
+    });
+
+    expect(verifyAgainstRequest(ebookRequest(), matched, file()).passed).toBe(true);
+  });
+
+  it('files a file whose own year is old when the provider places it in the requested era', () => {
+    const matched = metadata({ title: 'An Introduction to Moral Philosophy', authors: ['Jonathan Wolff'], publishedYear: 2025 });
+
+    expect(verifyAgainstRequest(ebookRequest(), matched, file()).passed).toBe(true);
+  });
+
+  it('keeps the usual reason when the title already failed, rather than renaming it an edition problem', () => {
+    const outcome = verifyAgainstRequest(ebookRequest(), null, file({ title: 'A Completely Different Book' }));
+
+    expect(outcome).toMatchObject({ passed: false, code: 'below_threshold' });
+    expect(yearRow(outcome)).toBeUndefined();
+  });
+
+  it('holds the edition regardless of how low the operator sets the bar', () => {
+    const outcome = verifyAgainstRequest(ebookRequest(), null, file(), 0);
+
+    expect(outcome).toMatchObject({ passed: false, code: 'edition_mismatch' });
+  });
+});
+
+/**
  * The right number depends on an instance's own trackers and metadata providers, so the operator
  * moves it. What must not move is the shape: one score, measured against whatever it was told.
  */
@@ -164,7 +297,7 @@ describe('verifyAgainstRequest with an operator-set threshold', () => {
  */
 describe('RequestVerificationService against the configured threshold', () => {
   function makeService(threshold: number, verificationEnabled = true, overrides: { requestSettled?: boolean; holdForReview?: boolean } = {}) {
-    const events = { on: vi.fn() };
+    const events = { on: vi.fn(), onOwnedFileExit: vi.fn() };
     const dockRepo = {
       findById: vi
         .fn()
@@ -840,5 +973,163 @@ describe('RequestVerificationService review surface', () => {
     expect(requests.updateIf).toHaveBeenLastCalledWith(7, ['failed'], expect.objectContaining({ status: 'needs_review' }));
     expect(downloads.updateIf).toHaveBeenLastCalledWith(11, ['failed'], expect.objectContaining({ status: 'needs_review' }));
     expect(gateway.emitChanged).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A person can answer a hold in the Book Dock instead of on the request. The request waits on that
+ * file, so it has to settle the way the request's own File or Discard would, rather than sit in
+ * review over a file that is gone.
+ */
+describe('RequestVerificationService when a held file leaves the Book Dock', () => {
+  const heldRequest = {
+    ...request(),
+    id: 7,
+    status: 'needs_review',
+    bookDockFileId: 100,
+    companionRequestId: null,
+    selfServe: true,
+  } as BookRequestRow;
+  const heldDownload = { id: 11, requestId: 7, status: 'needs_review', bookDockFileId: 100 } as BookRequestDownloadRow;
+  const settledAs = (id: number, _expected: unknown, patch: Record<string, unknown>) => Promise.resolve({ id, ...patch });
+
+  function makeService(held = [{ fileId: 100, download: heldDownload, request: heldRequest }]) {
+    const events = { on: vi.fn(), onOwnedFileExit: vi.fn() };
+    const downloads = { findHeldOverDockFiles: vi.fn().mockResolvedValue(held), updateIf: vi.fn().mockImplementation(settledAs) };
+    const requests = { updateIf: vi.fn().mockImplementation(settledAs) };
+    const notifier = { notifyResponsible: vi.fn().mockResolvedValue(undefined), notifyBookAvailable: vi.fn().mockResolvedValue(undefined) };
+    const gateway = { emitChanged: vi.fn() };
+    const companions = { handOn: vi.fn().mockResolvedValue(false) };
+
+    const service = new RequestVerificationService(
+      events as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      downloads as never,
+      requests as never,
+      {} as never,
+      notifier as never,
+      gateway as never,
+      {} as never,
+      companions as never,
+      {} as never,
+      new UploadValidatorService(),
+    );
+    service.onModuleInit();
+    const handler = events.onOwnedFileExit.mock.calls[0]![0] as BookDockOwnedFileExitHandler;
+
+    return { handler, downloads, requests, notifier, gateway, companions };
+  }
+
+  it('reads the holds before the dock acts, for the files it was given', async () => {
+    const { handler, downloads, requests } = makeService();
+
+    await handler([100, 101]);
+
+    expect(downloads.findHeldOverDockFiles).toHaveBeenCalledExactlyOnceWith([100, 101]);
+    expect(requests.updateIf).not.toHaveBeenCalled();
+  });
+
+  it('makes the request available with the book its held file was filed into', async () => {
+    const { handler, downloads, requests, notifier, gateway, companions } = makeService();
+
+    const reportExit = await handler([100]);
+    await reportExit(100, { kind: 'filed', bookId: 55 });
+
+    expect(requests.updateIf).toHaveBeenCalledExactlyOnceWith(7, ['needs_review'], {
+      status: 'available',
+      matchedBookId: 55,
+      bookDockFileId: null,
+      statusReason: null,
+    });
+    expect(downloads.updateIf).toHaveBeenCalledExactlyOnceWith(11, ['needs_review'], { status: 'imported', importedAt: expect.any(Date) });
+    expect(notifier.notifyBookAvailable).toHaveBeenCalledWith(7, 55, expect.objectContaining({ meta: { requestId: 7, bookId: 55 } }));
+    expect(companions.handOn).toHaveBeenCalledWith(heldRequest, 55);
+    expect(notifier.notifyResponsible).not.toHaveBeenCalled();
+    expect(gateway.emitChanged).toHaveBeenCalledOnce();
+  });
+
+  it('fails the request the way its own Discard does when the held file is discarded', async () => {
+    const { handler, downloads, requests, notifier, gateway, companions } = makeService();
+
+    const reportExit = await handler([100]);
+    await reportExit(100, { kind: 'discarded' });
+
+    expect(requests.updateIf).toHaveBeenCalledExactlyOnceWith(7, ['needs_review'], {
+      status: 'failed',
+      statusReason: 'The imported file was discarded during review',
+      failureCode: null,
+      failureMeta: null,
+    });
+    expect(downloads.updateIf).toHaveBeenCalledExactlyOnceWith(11, ['needs_review'], {
+      status: 'failed',
+      errorMessage: 'The imported file was discarded during review',
+      failureCode: 'discarded',
+    });
+    expect(notifier.notifyResponsible).toHaveBeenCalledWith(
+      heldRequest,
+      NotificationType.BookRequestFailed,
+      expect.objectContaining({ title: 'Book request import discarded', meta: { requestId: 7, downloadId: 11, dockFileId: 100 } }),
+    );
+    expect(notifier.notifyBookAvailable).not.toHaveBeenCalled();
+    expect(companions.handOn).not.toHaveBeenCalled();
+    expect(gateway.emitChanged).toHaveBeenCalledOnce();
+  });
+
+  it('leaves alone a request somebody answered while the dock was working', async () => {
+    const { handler, downloads, requests, notifier, gateway } = makeService();
+    requests.updateIf.mockResolvedValue(undefined);
+
+    const reportExit = await handler([100]);
+    await reportExit(100, { kind: 'filed', bookId: 55 });
+    await reportExit(100, { kind: 'discarded' });
+
+    expect(requests.updateIf).toHaveBeenCalledOnce();
+    expect(downloads.updateIf).not.toHaveBeenCalled();
+    expect(notifier.notifyBookAvailable).not.toHaveBeenCalled();
+    expect(gateway.emitChanged).not.toHaveBeenCalled();
+  });
+
+  /** The file is gone either way, so the request is not put back in review over nothing. */
+  it('keeps the request settled when its attempt already moved on', async () => {
+    const { handler, downloads, requests, notifier } = makeService();
+    downloads.updateIf.mockResolvedValue(undefined);
+
+    const reportExit = await handler([100]);
+    await reportExit(100, { kind: 'discarded' });
+
+    expect(requests.updateIf).toHaveBeenCalledOnce();
+    expect(notifier.notifyResponsible).toHaveBeenCalledOnce();
+  });
+
+  it('touches nothing for a file no request is waiting on', async () => {
+    const { handler, downloads, requests, gateway } = makeService([]);
+
+    const reportExit = await handler([100]);
+    await reportExit(100, { kind: 'filed', bookId: 55 });
+
+    expect(requests.updateIf).not.toHaveBeenCalled();
+    expect(downloads.updateIf).not.toHaveBeenCalled();
+    expect(gateway.emitChanged).not.toHaveBeenCalled();
+  });
+
+  it('ignores an exit for a file it was not asked about', async () => {
+    const { handler, requests } = makeService();
+
+    const reportExit = await handler([100]);
+    await reportExit(200, { kind: 'discarded' });
+
+    expect(requests.updateIf).not.toHaveBeenCalled();
+  });
+
+  it('still refreshes the lists when telling people fails', async () => {
+    const { handler, notifier, gateway } = makeService();
+    notifier.notifyBookAvailable.mockRejectedValue(new Error('mail server down'));
+
+    const reportExit = await handler([100]);
+
+    await expect(reportExit(100, { kind: 'filed', bookId: 55 })).rejects.toThrow('mail server down');
+    expect(gateway.emitChanged).toHaveBeenCalledOnce();
   });
 });
