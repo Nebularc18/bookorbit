@@ -34,6 +34,8 @@ import { type BookSyncData, HardcoverRepository } from './hardcover.repository';
 import { HardcoverSettingsService } from './hardcover-settings.service';
 import { sessionProgressUpdates } from './hardcover-session-progress';
 import {
+  computeHardcoverRetrySchedule,
+  isRetryableHardcoverSyncError,
   normalizeHardcoverBookSyncOverride,
   resolveHardcoverBookSyncDecision,
   resolveHardcoverBookSyncOverrideForToggle,
@@ -178,22 +180,34 @@ export class HardcoverSyncService {
     private readonly bookService: BookService,
   ) {}
 
-  async syncBook(userId: number, bookId: number): Promise<HardcoverSyncBookResult> {
-    return this.withBookSyncLock(userId, bookId, () => this.syncBookUnlocked(userId, bookId));
+  async syncBook(userId: number, bookId: number, options?: { isRetry?: boolean }): Promise<HardcoverSyncBookResult> {
+    return this.withBookSyncLock(userId, bookId, () => this.syncBookUnlocked(userId, bookId, options));
   }
 
-  private async syncBookUnlocked(userId: number, bookId: number): Promise<HardcoverSyncBookResult> {
+  private async syncBookUnlocked(userId: number, bookId: number, options?: { isRetry?: boolean }): Promise<HardcoverSyncBookResult> {
     const token = await this.settingsService.getTokenForUser(userId);
     if (!token) return 'skipped';
 
     const book = await this.repo.findBookSyncData(userId, bookId);
-    if (!book) return 'skipped';
+    if (!book) {
+      if (options?.isRetry) await this.clearBookRetrySchedule(userId, bookId);
+      return 'skipped';
+    }
 
     const state = await this.repo.findBookState(userId, book.bookId);
     const settings = await this.settingsService.getSettings(userId);
-    if (!this.isBookInSyncScope(settings, book, state)) return 'skipped';
+    if (!this.isBookInSyncScope(settings, book, state)) {
+      if (options?.isRetry) await this.clearBookRetrySchedule(userId, book.bookId);
+      return 'skipped';
+    }
 
-    return this.syncSingleBook(userId, token, book, state);
+    return this.syncSingleBook(userId, token, book, state, options);
+  }
+
+  private async clearBookRetrySchedule(userId: number, bookId: number): Promise<void> {
+    if (typeof this.repo.clearBookRetrySchedule === 'function') {
+      await this.repo.clearBookRetrySchedule(userId, bookId);
+    }
   }
 
   private async withBookSyncLock<T>(userId: number, bookId: number, operation: () => Promise<T>): Promise<T> {
@@ -489,47 +503,66 @@ export class HardcoverSyncService {
     token: string,
     book: BookSyncData,
     initialState?: HardcoverBookStateSnapshot,
+    options?: { isRetry?: boolean },
   ): Promise<HardcoverSyncBookResult> {
     const startedAt = Date.now();
     const latestState = await this.repo.findBookState(userId, book.bookId);
     const activeInitialState = latestState ?? initialState;
     const settings = await this.settingsService.getSettings(userId);
-    if (!this.isBookInSyncScope(settings, book, latestState ?? activeInitialState)) return 'skipped';
+    if (!this.isBookInSyncScope(settings, book, latestState ?? activeInitialState)) {
+      if (options?.isRetry) await this.clearBookRetrySchedule(userId, book.bookId);
+      return 'skipped';
+    }
 
     const hardcoverStatusId = STATUS_MAP[book.status as ReadStatus];
     if (!hardcoverStatusId) {
-      if (book.status === 'unread') return 'skipped';
+      if (book.status === 'unread') {
+        if (options?.isRetry) await this.clearBookRetrySchedule(userId, book.bookId);
+        return 'skipped';
+      }
       await this.repo.upsertBookState({
         userId,
         bookId: book.bookId,
         syncError: `no_status_mapping:${book.status}`,
+        retryCount: 0,
+        nextRetryAt: null,
         ...this.buildAttemptSnapshot(book),
       });
       return 'skipped';
     }
 
     const decision = this.resolveSyncDecision(settings, book, latestState ?? activeInitialState);
-    if (!decision.canSyncNow) return 'skipped';
-
-    const match = await this.matchService.matchBook(userId, token, book);
-    if (!match) {
-      const state = activeInitialState ?? (await this.repo.findBookState(userId, book.bookId));
-      await this.repo.upsertBookState({
-        userId,
-        bookId: book.bookId,
-        hardcoverBookId: state?.hardcoverBookId ?? null,
-        syncError: 'no_match',
-        ...this.buildAttemptSnapshot(book),
-      });
-      this.logger.warn(
-        `[hardcover.sync_book] [fail] userId=${userId} bookId=${book.bookId} durationMs=${Date.now() - startedAt} errorClass=MatchError error="no_match" - Hardcover book match not found`,
-      );
+    if (!decision.canSyncNow) {
+      if (options?.isRetry) await this.clearBookRetrySchedule(userId, book.bookId);
       return 'skipped';
     }
 
     const hardcoverRating = book.rating ?? null;
+    let matchedBookId: number | null = activeInitialState?.hardcoverBookId ?? null;
+    let matchedMethod: string | null = activeInitialState?.matchMethod ?? null;
 
     try {
+      const match = await this.matchService.matchBook(userId, token, book);
+      if (!match) {
+        const state = activeInitialState ?? (await this.repo.findBookState(userId, book.bookId));
+        await this.repo.upsertBookState({
+          userId,
+          bookId: book.bookId,
+          hardcoverBookId: state?.hardcoverBookId ?? null,
+          syncError: 'no_match',
+          retryCount: 0,
+          nextRetryAt: null,
+          ...this.buildAttemptSnapshot(book),
+        });
+        this.logger.warn(
+          `[hardcover.sync_book] [fail] userId=${userId} bookId=${book.bookId} durationMs=${Date.now() - startedAt} errorClass=MatchError error="no_match" - Hardcover book match not found`,
+        );
+        return 'skipped';
+      }
+
+      matchedBookId = match.hardcoverBookId;
+      matchedMethod = match.matchMethod;
+
       const startDate = toDateString(book.startedAt);
       const endDate = toDateString(book.finishedAt);
       const localAttempts = typeof this.repo.findReadingAttempts === 'function' ? await this.repo.findReadingAttempts(userId, book.bookId) : [];
@@ -540,14 +573,25 @@ export class HardcoverSyncService {
       const hasSessionProgress = sessions.length > 0 && book.progress != null;
       // Marking a book read can fill its remote progress before the dated updates arrive.
       const deferCompletion = hasSessionProgress && hardcoverStatusId === HARDCOVER_STATUS.READ;
-      const userBookId = await this.insertOrFindUserBook(userId, token, {
-        bookId: match.hardcoverBookId,
-        statusId: deferCompletion ? HARDCOVER_STATUS.WANT_TO_READ : hardcoverStatusId,
-        privacySettingId: settings.privacySettingId,
-        editionId: match.hardcoverEditionId ?? undefined,
-      });
+      const cachedUserBookId = match.replacedHardcoverBookId != null ? null : (activeInitialState?.hardcoverUserBookId ?? null);
+      const userBookId =
+        cachedUserBookId ??
+        (await this.insertOrFindUserBook(userId, token, {
+          bookId: match.hardcoverBookId,
+          statusId: deferCompletion ? HARDCOVER_STATUS.WANT_TO_READ : hardcoverStatusId,
+          privacySettingId: settings.privacySettingId,
+          editionId: match.hardcoverEditionId ?? undefined,
+        }));
 
-      if (!deferCompletion) {
+      const userBookFieldsChanged =
+        cachedUserBookId == null ||
+        activeInitialState?.lastSyncedAt == null ||
+        activeInitialState?.syncError != null ||
+        book.status !== activeInitialState.lastSyncedStatus ||
+        book.rating !== activeInitialState.lastSyncedRating ||
+        (match.hardcoverEditionId ?? null) !== (activeInitialState.hardcoverEditionId ?? null);
+
+      if (!deferCompletion && userBookFieldsChanged) {
         await this.updateUserBookFields(userId, token, userBookId, {
           statusId: hardcoverStatusId,
           privacySettingId: settings.privacySettingId,
@@ -656,6 +700,8 @@ export class HardcoverSyncService {
         matchMethod: match.matchMethod,
         matchError: null,
         syncError: null,
+        retryCount: 0,
+        nextRetryAt: null,
         lastSyncedAt: new Date(),
         lastSyncedStatus: book.status,
         lastSyncedProgress: progressSynced ? book.progress : null,
@@ -674,15 +720,19 @@ export class HardcoverSyncService {
       const error = sanitizeLogValue(err instanceof Error ? err.message : String(err));
       const cause = describeErrorCause(err);
       const causeField = cause ? ` cause="${sanitizeLogValue(cause)}"` : '';
+      const retryBaseCount = options?.isRetry ? (activeInitialState?.retryCount ?? 0) : 0;
+      const { retryCount, nextRetryAt } = computeHardcoverRetrySchedule(error, retryBaseCount);
       this.logger.error(
-        `[hardcover.sync_book] [fail] userId=${userId} bookId=${book.bookId} durationMs=${Date.now() - startedAt} errorClass=${errorClass} error="${error}"${causeField} - sync failed`,
+        `[hardcover.sync_book] [fail] userId=${userId} bookId=${book.bookId} durationMs=${Date.now() - startedAt} retryCount=${retryCount} nextRetryAt=${nextRetryAt ? nextRetryAt.toISOString() : 'none'} errorClass=${errorClass} error="${error}"${causeField} - sync failed`,
       );
       await this.repo.upsertBookState({
         userId,
         bookId: book.bookId,
-        hardcoverBookId: match.hardcoverBookId,
-        matchMethod: match.matchMethod,
+        hardcoverBookId: matchedBookId,
+        matchMethod: matchedMethod,
         syncError: error,
+        retryCount,
+        nextRetryAt,
       });
       return 'failed';
     }
@@ -787,24 +837,18 @@ export class HardcoverSyncService {
     userBookId: number,
     fields: { statusId: number; privacySettingId: number; rating: number | null; editionId?: number },
   ): Promise<void> {
-    try {
-      const result = await this.client.query<UpdateUserBookResult>(userId, token, UPDATE_USER_BOOK_MUTATION, {
-        id: userBookId,
-        object: {
-          status_id: fields.statusId,
-          privacy_setting_id: fields.privacySettingId,
-          ...(fields.rating != null && { rating: fields.rating }),
-          ...(fields.editionId != null && { edition_id: fields.editionId }),
-        },
-      });
+    const result = await this.client.query<UpdateUserBookResult>(userId, token, UPDATE_USER_BOOK_MUTATION, {
+      id: userBookId,
+      object: {
+        status_id: fields.statusId,
+        privacy_setting_id: fields.privacySettingId,
+        ...(fields.rating != null && { rating: fields.rating }),
+        ...(fields.editionId != null && { edition_id: fields.editionId }),
+      },
+    });
 
-      if (result.update_user_book?.error) {
-        throw new Error(result.update_user_book.error);
-      }
-    } catch (err) {
-      this.logger.warn(
-        `[hardcover.sync_book] update_user_book failed for userBookId=${userBookId}: ${sanitizeLogValue(err instanceof Error ? err.message : String(err))}`,
-      );
+    if (result.update_user_book?.error) {
+      throw new Error(result.update_user_book.error);
     }
   }
 
@@ -966,6 +1010,7 @@ export class HardcoverSyncService {
 
   private hasChanges(book: BookSyncData, state: Awaited<ReturnType<HardcoverRepository['findBookState']>>): boolean {
     if (!state?.lastSyncedAt) return true;
+    if (isRetryableHardcoverSyncError(state.syncError)) return true;
     if (book.attemptsUpdatedAt && book.attemptsUpdatedAt > state.lastSyncedAt) return true;
     if (book.hardcoverMetadataId && state.syncError === 'no_match') return true;
     if (state.matchBasis != null) {

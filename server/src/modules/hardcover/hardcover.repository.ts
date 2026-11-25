@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AUDIO_FORMAT_LIST, isAudioFormat, Permission } from '@bookorbit/types';
 import type { ContentFilterRules, ReadStatus } from '@bookorbit/types';
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { alias } from 'drizzle-orm/pg-core';
 
@@ -10,6 +10,7 @@ import { resolveTimeZone } from '../../common/utils/timezone.utils';
 import { DB } from '../../db';
 import * as schema from '../../db/schema';
 import type { HardcoverBookState, HardcoverUserSetting, NewHardcoverBookState, NewHardcoverUserSetting } from '../../db/schema';
+import { HARDCOVER_NON_RETRYABLE_SYNC_ERRORS, HARDCOVER_SYNC_MAX_RETRIES } from './hardcover.constants';
 import { HARDCOVER_EXTERNAL_PROVIDER } from './hardcover-read-selection';
 
 type Db = NodePgDatabase<typeof schema>;
@@ -220,6 +221,64 @@ export class HardcoverRepository {
       })
       .returning();
     return row!;
+  }
+
+  /**
+   * Returns failed book sync rows due for automatic retry, bounded by `limit`.
+   * Includes legacy rows (`sync_error IS NOT NULL`, `retry_count = 0`, `next_retry_at IS NULL`)
+   * so books that failed before retry scheduling existed are picked up automatically.
+   */
+  async findDueRetryBookStates(
+    now: Date,
+    limit: number,
+  ): Promise<Array<{ userId: number; bookId: number; syncError: string | null; retryCount: number }>> {
+    return this.db
+      .select({
+        userId: schema.hardcoverBookState.userId,
+        bookId: schema.hardcoverBookState.bookId,
+        syncError: schema.hardcoverBookState.syncError,
+        retryCount: schema.hardcoverBookState.retryCount,
+      })
+      .from(schema.hardcoverBookState)
+      .innerJoin(schema.hardcoverUserSettings, eq(schema.hardcoverUserSettings.userId, schema.hardcoverBookState.userId))
+      .where(
+        and(
+          eq(schema.hardcoverUserSettings.enabled, true),
+          isNotNull(schema.hardcoverBookState.syncError),
+          notInArray(schema.hardcoverBookState.syncError, [...HARDCOVER_NON_RETRYABLE_SYNC_ERRORS]),
+          sql`${schema.hardcoverBookState.syncError} not like 'no_status_mapping:%'`,
+          eq(schema.hardcoverBookState.syncExcluded, false),
+          or(isNull(schema.hardcoverBookState.syncOverride), ne(schema.hardcoverBookState.syncOverride, 'excluded')),
+          lte(schema.hardcoverBookState.retryCount, HARDCOVER_SYNC_MAX_RETRIES),
+          or(
+            lte(schema.hardcoverBookState.nextRetryAt, now),
+            and(isNull(schema.hardcoverBookState.nextRetryAt), eq(schema.hardcoverBookState.retryCount, 0)),
+          ),
+        ),
+      )
+      .orderBy(sql`${schema.hardcoverBookState.nextRetryAt} asc nulls first`, asc(schema.hardcoverBookState.updatedAt))
+      .limit(limit);
+  }
+
+  async clearBookRetrySchedule(userId: number, bookId: number): Promise<void> {
+    await this.db
+      .update(schema.hardcoverBookState)
+      .set({ retryCount: 0, nextRetryAt: null, updatedAt: new Date() })
+      .where(and(eq(schema.hardcoverBookState.userId, userId), eq(schema.hardcoverBookState.bookId, bookId)));
+  }
+
+  async resetFailedBookRetriesForUser(userId: number): Promise<void> {
+    await this.db
+      .update(schema.hardcoverBookState)
+      .set({ retryCount: 0, nextRetryAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.hardcoverBookState.userId, userId),
+          isNotNull(schema.hardcoverBookState.syncError),
+          ne(schema.hardcoverBookState.syncError, 'no_match'),
+          sql`${schema.hardcoverBookState.syncError} not like 'no_status_mapping:%'`,
+        ),
+      );
   }
 
   // ---- Sync Settings ----

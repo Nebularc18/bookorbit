@@ -725,4 +725,29 @@ describe('HardcoverRepository', () => {
       await expect(repo.findClaimedHardcoverReadIds(7, 42)).resolves.toEqual([]);
     });
   });
+
+  describe('findDueRetryBookStates', () => {
+    it('selects due and legacy failed sync rows for enabled users with a limit', async () => {
+      const { repo, db } = makeRepository();
+      const dueRows = [{ userId: 7, bookId: 42, syncError: 'Hardcover API error: 503', retryCount: 0 }];
+      const limit = vi.fn().mockResolvedValue(dueRows);
+      const orderBy = vi.fn().mockReturnValue({ limit });
+      const where = vi.fn().mockReturnValue({ orderBy });
+      const innerJoin = vi.fn().mockReturnValue({ where });
+      db.select.mockReturnValue({ from: vi.fn().mockReturnValue({ innerJoin }) } as never);
+
+      const now = new Date('2026-11-25T00:00:00.000Z');
+      const result = await repo.findDueRetryBookStates(now, 50);
+
+      expect(result).toEqual(dueRows);
+      expect(limit).toHaveBeenCalledWith(50);
+
+      const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0]);
+      expect(query.sql).toContain('"hardcover_user_settings"."enabled" =');
+      expect(query.sql).toContain('"hardcover_book_state"."sync_error" is not null');
+      expect(query.sql).toContain('"hardcover_book_state"."next_retry_at" <= ');
+      expect(query.sql).toContain('"hardcover_book_state"."next_retry_at" is null');
+      expect(query.sql).toContain('"hardcover_book_state"."retry_count" =');
+    });
+  });
 });

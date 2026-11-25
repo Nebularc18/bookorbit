@@ -1702,9 +1702,10 @@ describe('HardcoverSyncService', () => {
       mockRepo.findBookSyncData.mockResolvedValue(wantToRead);
       mockRepo.findBookState.mockResolvedValue(staleState);
       mockMatchService.matchBook.mockResolvedValue(match);
-      mockClient.query
-        .mockResolvedValueOnce({ insert_user_book: { user_book: { id: 19544262 }, error: null } })
-        .mockResolvedValueOnce({ update_user_book: { user_book: { id: 19544262 }, error: null } });
+      if (match.replacedHardcoverBookId != null) {
+        mockClient.query.mockResolvedValueOnce({ insert_user_book: { user_book: { id: 19544262 }, error: null } });
+      }
+      mockClient.query.mockResolvedValueOnce({ update_user_book: { user_book: { id: 19544262 }, error: null } });
     }
 
     it("does not carry the old book's read id over", async () => {
@@ -1808,6 +1809,148 @@ describe('HardcoverSyncService', () => {
 
       await expect(makeService().syncBook(1, 1)).resolves.toBe('skipped');
       expect(mockMatchService.matchBook).not.toHaveBeenCalled();
+    });
+
+    it('treats a book with a retryable syncError as having pending changes even when fields match lastSynced', async () => {
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findBookSyncData.mockResolvedValue(readingBook);
+      mockRepo.findBookState.mockResolvedValue({
+        ...syncedState,
+        syncError: 'Hardcover API error: 503',
+        retryCount: 1,
+      });
+
+      const state = await makeService().getBookSyncState(1, 1);
+      expect(state.canSyncNow).toBe(true);
+    });
+  });
+
+  describe('failed sync retry scheduling and API call reduction', () => {
+    it('schedules a retry when update_user_book fails while finishing a book', async () => {
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findBookSyncData.mockResolvedValue({
+        ...readingBook,
+        status: 'read',
+        progress: 100,
+        finishedAt: new Date('2026-11-25'),
+      });
+      mockRepo.findBookState.mockResolvedValue({
+        hardcoverBookId: 10,
+        hardcoverEditionId: 20,
+        hardcoverUserBookId: 55,
+        hardcoverReadId: 77,
+        lastSyncedAt: new Date('2026-11-24T10:00:00Z'),
+        lastSyncedStatus: 'reading',
+        lastSyncedProgress: 80,
+      });
+      mockMatchService.matchBook.mockResolvedValue({
+        hardcoverBookId: 10,
+        hardcoverEditionId: 20,
+        editionPages: 300,
+        matchMethod: 'cached',
+      });
+      mockClient.query.mockRejectedValueOnce(new Error('Hardcover rate limit exceeded'));
+
+      await expect(makeService().syncBook(1, 1)).resolves.toBe('failed');
+
+      expect(mockRepo.upsertBookState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 1,
+          bookId: 1,
+          syncError: 'Hardcover rate limit exceeded',
+          retryCount: 1,
+          nextRetryAt: expect.any(Date),
+        }),
+      );
+    });
+
+    it('increments retryCount on retry sweep failures and clears retry state on success', async () => {
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findBookSyncData.mockResolvedValue({ ...readingBook, status: 'read', progress: null, startedAt: null, finishedAt: null });
+      mockRepo.findBookState.mockResolvedValue({
+        hardcoverBookId: 10,
+        hardcoverEditionId: 20,
+        hardcoverUserBookId: 55,
+        syncError: 'Hardcover API error: 500',
+        retryCount: 2,
+      });
+      mockMatchService.matchBook.mockResolvedValue({
+        hardcoverBookId: 10,
+        hardcoverEditionId: 20,
+        editionPages: 300,
+        matchMethod: 'cached',
+      });
+      mockClient.query.mockRejectedValueOnce(new Error('Hardcover API error: 500'));
+
+      await expect(makeService().syncBook(1, 1, { isRetry: true })).resolves.toBe('failed');
+      expect(mockRepo.upsertBookState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          syncError: 'Hardcover API error: 500',
+          retryCount: 3,
+          nextRetryAt: expect.any(Date),
+        }),
+      );
+
+      mockClient.query.mockResolvedValueOnce({ update_user_book: { user_book: { id: 55 }, error: null } });
+      await expect(makeService().syncBook(1, 1, { isRetry: true })).resolves.toBe('synced');
+      expect(mockRepo.upsertBookState).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          syncError: null,
+          retryCount: 0,
+          nextRetryAt: null,
+        }),
+      );
+    });
+
+    it('records a retryable failure instead of no_match when matchBook throws on an upstream error', async () => {
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findBookSyncData.mockResolvedValue({ ...readingBook, status: 'read' });
+      mockRepo.findBookState.mockResolvedValue(undefined);
+      mockMatchService.matchBook.mockRejectedValueOnce(new Error('Hardcover book match lookup failed'));
+
+      await expect(makeService().syncBook(1, 1)).resolves.toBe('failed');
+
+      expect(mockRepo.upsertBookState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          syncError: 'Hardcover book match lookup failed',
+          retryCount: 1,
+          nextRetryAt: expect.any(Date),
+        }),
+      );
+    });
+
+    it('reuses cached hardcoverUserBookId and skips update_user_book on progress-only syncs', async () => {
+      mockSettingsService.getTokenForUser.mockResolvedValue('tok');
+      mockRepo.findBookSyncData.mockResolvedValue({ ...readingBook, progress: 55 });
+      mockRepo.findBookState.mockResolvedValue({
+        hardcoverBookId: 10,
+        hardcoverEditionId: 20,
+        hardcoverUserBookId: 55,
+        hardcoverReadId: 77,
+        lastSyncedAt: new Date('2026-11-24T10:00:00Z'),
+        lastSyncedStatus: 'reading',
+        lastSyncedProgress: 42,
+        lastSyncedRating: null,
+        lastSyncedStartedAt: '2024-01-01',
+        lastSyncedFinishedAt: null,
+        syncError: null,
+      });
+      mockMatchService.matchBook.mockResolvedValue({
+        hardcoverBookId: 10,
+        hardcoverEditionId: 20,
+        editionPages: 300,
+        matchMethod: 'cached',
+      });
+      mockClient.query
+        .mockResolvedValueOnce({ user_book_reads: [{ id: 77, started_at: '2024-01-01', finished_at: null, progress_pages: 126 }] })
+        .mockResolvedValueOnce({ update_user_book_read: { user_book_read: { id: 77 }, error: null } });
+
+      await expect(makeService().syncBook(1, 1)).resolves.toBe('synced');
+
+      // Only findUserBookReads + updateUserBookRead should run (no insert_user_book, no find_user_book, no update_user_book).
+      expect(mockClient.query).toHaveBeenCalledTimes(2);
+      expect(mockClient.query).not.toHaveBeenCalledWith(1, 'tok', expect.stringContaining('InsertUserBook'), expect.anything());
+      expect(mockClient.query).not.toHaveBeenCalledWith(1, 'tok', expect.stringContaining('UpdateUserBook('), expect.anything());
     });
   });
 });
