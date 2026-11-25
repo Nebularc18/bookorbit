@@ -11,7 +11,7 @@ import {
   ACHIEVEMENT_EVENT_READING_SESSION_SAVED,
 } from '../achievement/achievement-events.service';
 import { HardcoverEventListener } from '../hardcover/hardcover-event-listener.service';
-import { HardcoverAutoSyncSchedulerService, HARDCOVER_AUTO_SYNC_DEBOUNCE_MS } from '../hardcover/hardcover-auto-sync-scheduler.service';
+import { HardcoverAutoSyncSchedulerService, HARDCOVER_AUTO_SYNC_PROGRESS_DEBOUNCE_MS } from '../hardcover/hardcover-auto-sync-scheduler.service';
 import { AudiobookChaptersService } from '../audiobook-chapters/audiobook-chapters.service';
 import { AudiobookService } from './audiobook.service';
 
@@ -183,7 +183,7 @@ describe('AudiobookService', () => {
         makeUser(),
       );
       expect(syncBook).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(HARDCOVER_AUTO_SYNC_DEBOUNCE_MS);
+      await vi.advanceTimersByTimeAsync(HARDCOVER_AUTO_SYNC_PROGRESS_DEBOUNCE_MS);
       expect(syncBook).toHaveBeenCalledTimes(enabled ? 1 : 0);
       if (enabled) expect(syncBook).toHaveBeenCalledWith(7, 30);
       expect(bookService.autoUpdateReadStatusForProgress).toHaveBeenCalledTimes(2);
