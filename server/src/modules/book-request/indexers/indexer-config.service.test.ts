@@ -153,6 +153,7 @@ describe('IndexerConfigService', () => {
         name: 'Managed books',
         managerId: 3,
         managerPriority: 5,
+        managerImplementation: 'Cardigann',
         credential: 'api-key',
         allowPrivateAddress: true,
         networkProfile: { resolvers: ['1.1.1.1'] },

@@ -13,6 +13,7 @@ import { legacyStagedClientDir, stagedClientDir } from '../download-clients/down
 import { BookRequestDownloadRepository } from './book-request-download.repository';
 import { DirectDownloadService } from './direct-download.service';
 import { ShelfmarkDownloadService } from './shelfmark-download.service';
+import { RequestUploadStorageService } from './request-upload-storage.service';
 
 /** Statuses an attempt only reaches once the client holds every byte of it. */
 const FINISHED_DOWNLOAD_STATUSES: readonly BookRequestDownloadStatus[] = ['completed', 'importing', 'needs_review', 'imported'];
@@ -41,6 +42,7 @@ export class DownloadRemovalService {
     private readonly direct: DirectDownloadService,
     private readonly shelfmark: ShelfmarkDownloadService,
     config: ConfigService,
+    private readonly uploads: RequestUploadStorageService,
   ) {
     this.appDataPath = config.getOrThrow<string>('storage.appDataPath');
   }
@@ -52,12 +54,15 @@ export class DownloadRemovalService {
   async removeAttempt(requestId: number, downloadId: number, deleteFiles: boolean, actor: string): Promise<boolean> {
     const download = await this.downloads.findById(downloadId);
     if (!download || download.requestId !== requestId) throw new NotFoundException('That download attempt does not belong to this request');
-    if (!['direct_url', 'shelfmark'].includes(download.source) && download.downloadClientId === null) {
+    if (!isOwnedByBookOrbit(download) && download.downloadClientId === null) {
       throw new BadRequestException('That attempt is no longer attached to a download client');
     }
 
     await this.detach(download, deleteFiles);
-    return this.failIfInFlight(download, `Removed from the download client by ${actor}`);
+    return this.failIfInFlight(
+      download,
+      download.source === 'upload' ? `Upload cancelled by ${actor}` : `Removed from the download client by ${actor}`,
+    );
   }
 
   /**
@@ -68,8 +73,7 @@ export class DownloadRemovalService {
   async removeLatestForRequest(requestId: number, deleteFiles: boolean, actor: string): Promise<DownloadRemovalOutcome> {
     const latest = (await this.downloads.findLatestForRequests([requestId])).get(requestId);
     const download = latest?.download;
-    if (!download || (!['direct_url', 'shelfmark'].includes(download.source) && download.downloadClientId === null))
-      return { removed: false, error: null };
+    if (!download || (!isOwnedByBookOrbit(download) && download.downloadClientId === null)) return { removed: false, error: null };
 
     let error: string | null = null;
     let kept = false;
@@ -93,7 +97,9 @@ export class DownloadRemovalService {
         ? `Removed by ${actor}, but the download client refused: ${error}`
         : kept
           ? `Stopped by ${actor}; the finished torrent was left seeding in the download client`
-          : `Removed from the download client by ${actor}`,
+          : download.source === 'upload'
+            ? `Upload cancelled by ${actor}`
+            : `Removed from the download client by ${actor}`,
     );
     return { removed: !kept && error === null, error };
   }
@@ -132,6 +138,11 @@ export class DownloadRemovalService {
         `[book_request.staging_cleanup] [fail] requestId=${download.requestId} downloadId=${download.id} errorClass=${(error as Error)?.constructor?.name ?? 'Error'} error="${sanitizeLogValue(message)}" - direct-download staging was left on disk`,
       );
     }
+  }
+
+  /** Uploaded files are a copy made for the import, so they go once the Book Dock holds them. */
+  async cleanupStagedUpload(download: BookRequestDownloadRow): Promise<void> {
+    await this.uploads.discard(download);
   }
 
   /**
@@ -207,6 +218,13 @@ export class DownloadRemovalService {
   private async detach(download: BookRequestDownloadRow, deleteFiles: boolean): Promise<void> {
     // An attempt a source refused was never handed to anything, so there is nothing holding it.
     if (download.clientKey === null) return;
+    if (download.source === 'upload') {
+      await this.uploads.discard(download);
+      this.logger.log(
+        `[book_request.remove_download] [end] requestId=${download.requestId} downloadId=${download.id} source=upload - upload stopped and its files removed`,
+      );
+      return;
+    }
 
     const isDirect = download.source === 'direct_url';
     const stagesLocally = !isDirect && download.downloadClientId !== null && (await this.clients.stagesLocally(download.downloadClientId));
@@ -248,4 +266,9 @@ export class DownloadRemovalService {
     });
     return failed !== undefined;
   }
+}
+
+/** An attempt BookOrbit carries out itself, which has no client row to lose. */
+function isOwnedByBookOrbit(download: BookRequestDownloadRow): boolean {
+  return download.source === 'direct_url' || download.source === 'shelfmark' || download.source === 'upload';
 }

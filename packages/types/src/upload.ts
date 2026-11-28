@@ -22,6 +22,9 @@ export const UPLOAD_SUPPORTED_FORMATS = [
 
 export type UploadSupportedFormat = (typeof UPLOAD_SUPPORTED_FORMATS)[number];
 
+/** Bytes in each upload-session chunk. The web client sends a larger file as a session, in chunks this size. */
+export const UPLOAD_CHUNK_SIZE_BYTES = 16 * 1_024 * 1_024;
+
 export const UploadErrorCode = {
   TooLarge: "UPLOAD_TOO_LARGE",
   Empty: "UPLOAD_EMPTY",
@@ -48,7 +51,12 @@ export type UploadErrorCode = (typeof UploadErrorCode)[keyof typeof UploadErrorC
 export type UploadTarget =
   | { kind: "library"; libraryId: number; folderId?: number }
   | { kind: "existing_book"; bookId: number }
-  | { kind: "book_dock"; libraryId?: number };
+  | { kind: "book_dock"; libraryId?: number }
+  /**
+   * One file of an upload to a book request, named by its entry in the attempt's manifest. Send it
+   * only to a server advertising `book-request-upload`.
+   */
+  | { kind: "book_request"; requestFileId: number };
 
 export type UploadSessionStatus = "receiving" | "processing" | "completed" | "failed" | "cancelled" | "expired";
 

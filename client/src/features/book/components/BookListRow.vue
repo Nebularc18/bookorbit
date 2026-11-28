@@ -37,12 +37,12 @@ import { usePermissions } from '@/features/auth/composables/usePermissions'
 import { useLibraryPermissions } from '@/features/library/composables/useLibraryPermissions'
 import SendBookDialog from '@/features/email/components/SendBookDialog.vue'
 import { RATING_STARS, getRatingStarClass } from '@/features/book/lib/rating-stars'
-import { useDisplaySettings } from '@/composables/useDisplaySettings'
 import { displayPublishedDate } from '../lib/published-date'
 import { bookFormatEntries, formatKeyCode, type BookFormatEntry } from '@/features/book/lib/book-formats'
 import { formatChipStyle } from '@/features/book/lib/format-colors'
 import ActivateLink from '@/components/ActivateLink.vue'
 import { useOpenInNewTab } from '@/composables/useOpenInNewTab'
+import { seriesNameWithPosition } from '@/features/series/lib/series-unit-label'
 
 const COLLAPSED_SERIES_COVER_LIMIT = 3
 
@@ -68,7 +68,6 @@ const emit = defineEmits<{
 const { hasPermission } = usePermissions()
 const { hasLibraryPermission } = useLibraryPermissions()
 const canEditMetadata = computed(() => hasLibraryPermission('library_edit_metadata', props.book?.libraryId, 'editor'))
-const { thumbnailClickAction } = useDisplaySettings()
 const showSendDialog = ref(false)
 
 const collapsedSeries = computed(() => props.book.collapsedSeries ?? null)
@@ -97,8 +96,7 @@ const authorLine = computed(() => props.book.authors.join(', ') || null)
 const authorQuery = computed(() => props.book.authors[0] ?? null)
 const seriesLine = computed(() => {
   if (!props.book.seriesName) return null
-  const idx = props.book.seriesIndex
-  return idx != null ? `${props.book.seriesName} #${idx}` : props.book.seriesName
+  return seriesNameWithPosition(t, props.book.seriesName, props.book.seriesIndex, props.book.seriesUnit, props.book.seriesVolumeIndex)
 })
 
 const isMissing = computed(() => props.book.status === 'missing')
@@ -224,12 +222,7 @@ function handleRowClick(event: MouseEvent) {
     return
   }
 
-  if (thumbnailClickAction.value === 'details') {
-    openBookDetails()
-    return
-  }
-
-  emit('action', 'quick-view')
+  openBookDetails()
 }
 
 function handleRowAuxClick(event: MouseEvent) {

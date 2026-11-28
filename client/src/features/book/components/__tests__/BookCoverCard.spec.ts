@@ -7,6 +7,7 @@ import type { BookCard } from '@bookorbit/types'
 import { nextTick, ref } from 'vue'
 import { COVER_ASPECT_RATIO_KEY } from '@/features/book/lib/cover-aspect-ratio'
 import { useDisplaySettings } from '@/composables/useDisplaySettings'
+import { activateI18nLocale } from '@/i18n'
 
 config.global.stubs = { ...config.global.stubs, RouterLink: RouterLinkStub }
 
@@ -44,12 +45,12 @@ const globalStubs = {
   stubs: {
     DropdownMenu: { template: '<div><slot /></div>' },
     DropdownMenuContent: { template: '<div><slot /></div>' },
-    DropdownMenuItem: { template: '<div><slot /></div>' },
+    DropdownMenuItem: { template: '<div data-test="dropdown-item"><slot /></div>' },
     DropdownMenuTrigger: { template: '<div><slot /></div>' },
     DropdownMenuSeparator: { template: '<div data-test="dropdown-separator" />' },
     DropdownMenuSub: { template: '<div><slot /></div>' },
     DropdownMenuSubTrigger: { template: '<div><slot /></div>' },
-    DropdownMenuSubContent: { template: '<div><slot /></div>' },
+    DropdownMenuSubContent: { template: '<div data-test="dropdown-sub-content"><slot /></div>' },
     Tooltip: { template: '<div><slot /></div>' },
     TooltipTrigger: { template: '<div><slot /></div>' },
     TooltipContent: { template: '<div data-testid="tooltip-content"><slot /></div>' },
@@ -71,16 +72,8 @@ function mountCard(book: BookCard, coverAspectRatio: '2/3' | '1/1' = '2/3', cove
   })
 }
 
-const {
-  cardOverlays,
-  formatBadgeStyle,
-  bookSpineOverlay,
-  bookShadowStrength,
-  gridCardPrimaryLabel,
-  gridCardSecondaryLabel,
-  cardInfoMode,
-  thumbnailClickAction,
-} = useDisplaySettings()
+const { cardOverlays, formatBadgeStyle, bookSpineOverlay, bookShadowStrength, gridCardPrimaryLabel, gridCardSecondaryLabel, cardInfoMode } =
+  useDisplaySettings()
 
 beforeEach(() => {
   routerPushMock.mockClear()
@@ -95,7 +88,6 @@ afterEach(() => {
   gridCardPrimaryLabel.value = 'hidden'
   gridCardSecondaryLabel.value = 'hidden'
   cardInfoMode.value = 'hover-overlay'
-  thumbnailClickAction.value = 'reader'
 })
 
 const missingBook: BookCard = {
@@ -191,10 +183,10 @@ describe('BookCoverCard — missing state', () => {
     expect(badge.text().toLowerCase()).toContain('missing')
   })
 
-  it('uses cursor-default on the root when book is missing', () => {
+  it('keeps a pointer cursor on a missing book, whose details still open on click', () => {
     const wrapper = mountCard(missingBook)
     const root = wrapper.find('div')
-    expect(root.classes()).toContain('cursor-default')
+    expect(root.classes()).toContain('cursor-pointer')
   })
 })
 
@@ -216,7 +208,7 @@ describe('BookCoverCard — cover aspect override', () => {
 
 describe('BookCoverCard - actions menu', () => {
   const menuButtons = (wrapper: ReturnType<typeof mountCard>) =>
-    wrapper.findAll('button').filter((button) => button.find('.lucide-ellipsis-vertical, .lucide-more-vertical').exists())
+    wrapper.findAll('button').filter((button) => button.attributes('aria-label')?.startsWith('More actions'))
 
   it('names the menu after the book on the cover', () => {
     const buttons = menuButtons(mountCard(presentBook))
@@ -296,7 +288,6 @@ describe('BookCoverCard - present state', () => {
 
     const badges = wrapper.findAll('[data-testid="card-format-badge"]')
     expect(badges.map((badge) => badge.text())).toEqual([expect.stringContaining('EPUB')])
-    expect(wrapper.find('[data-testid="card-format-list"]').exists()).toBe(false)
   })
 
   it('keeps the primary pill and underlines the other formats in the underline style', () => {
@@ -306,7 +297,7 @@ describe('BookCoverCard - present state', () => {
 
     expect(wrapper.findAll('[data-testid="card-format-badge"]').map((badge) => badge.text())).toEqual([expect.stringContaining('EPUB')])
     expect(wrapper.findAll('[data-testid="card-format-segment"]')).toHaveLength(1)
-    expect(wrapper.findAll('[data-testid="card-format-list-chip"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="card-format-stripe"]')).toHaveLength(2)
   })
 
   it('folds every format into one badge in the dots style, a linked book format marked as linked (G1)', () => {
@@ -356,13 +347,13 @@ describe('BookCoverCard - present state', () => {
     expect(linked.find('[data-testid="card-editions-pill"]').exists()).toBe(false)
   })
 
-  it('lists every format in the hover overlay for any style but the primary pill', () => {
+  it.each(['primary', 'seal'] as const)('lists every format in the hover panel in the %s badge style', (style) => {
     cardOverlays.value = ['format']
-    formatBadgeStyle.value = 'seal'
+    formatBadgeStyle.value = style
     const wrapper = mountCard(multiFormatBook)
 
-    const chips = wrapper.findAll('[data-testid="card-format-list-chip"]')
-    expect(chips.map((chip) => chip.text())).toEqual([expect.stringContaining('EPUB'), expect.stringContaining('PDF')])
+    const stripes = wrapper.findAll('[data-testid="card-format-stripe"]')
+    expect(stripes.map((stripe) => stripe.text())).toEqual(['EPUB', 'PDF'])
   })
 
   it('draws the plain pill for a single-format book whatever the style', () => {
@@ -371,19 +362,9 @@ describe('BookCoverCard - present state', () => {
     const wrapper = mountCard(presentBook)
 
     expect(wrapper.get('[data-testid="card-format-badges"]').attributes('data-badge-style')).toBe('primary')
-    expect(wrapper.find('[data-testid="card-format-list"]').exists()).toBe(false)
   })
 
-  it('opens the reader on desktop card click by default', async () => {
-    const wrapper = mountCard(presentBook)
-
-    await wrapper.find('.group').trigger('click')
-
-    expect(routerPushMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'reader', params: { bookId: 2, fileId: 10 } }))
-  })
-
-  it('opens book details on desktop card click when thumbnail clicks prefer details', async () => {
-    thumbnailClickAction.value = 'details'
+  it('opens book details on a card click', async () => {
     const wrapper = mountCard(presentBook)
 
     await wrapper.find('.group').trigger('click')
@@ -392,14 +373,13 @@ describe('BookCoverCard - present state', () => {
     expect(routerPushMock).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'reader' }))
   })
 
-  it('opens book details from the primary overlay action when thumbnail clicks prefer details', async () => {
-    thumbnailClickAction.value = 'details'
+  it('opens the reader from the main action in the dock', async () => {
     const wrapper = mountCard(presentBook)
 
     await wrapper.get('[data-testid="grid-card-primary-action"]').trigger('click')
 
-    expect(routerPushMock).toHaveBeenCalledWith({ name: 'book-detail', params: { bookId: 2 } })
-    expect(routerPushMock).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'reader' }))
+    expect(routerPushMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'reader', params: { bookId: 2, fileId: 10 } }))
+    expect(routerPushMock).not.toHaveBeenCalledWith({ name: 'book-detail', params: { bookId: 2 } })
   })
 
   it('labels and describes the quick-view and start-reading actions', () => {
@@ -418,16 +398,45 @@ describe('BookCoverCard - present state', () => {
     expect(wrapper.get('[data-testid="grid-card-primary-action"]').attributes('aria-label')).toBe('Continue reading')
   })
 
-  it('labels the explicit reading action when thumbnail clicks prefer details', () => {
-    thumbnailClickAction.value = 'details'
-    const wrapper = mountCard(presentBook)
+  it.each(['hover-overlay', 'below-cover'] as const)('distinguishes the Finished status from the Read action in %s mode', async (mode) => {
+    activateI18nLocale('en')
+    cardInfoMode.value = mode
+    const wrapper = mountCard({
+      ...presentBook,
+      readingProgress: 100,
+      readStatus: { status: 'read', source: 'manual', startedAt: null, finishedAt: null, updatedAt: '2026-01-01T00:00:00.000Z' },
+    })
+    await wrapper.setProps({ showLabel: true })
+    const action = wrapper.get('[data-testid="grid-card-primary-action"]')
 
-    expect(wrapper.get('[data-testid="grid-card-primary-action"]').attributes('aria-label')).toBe('Book Details')
-    expect(wrapper.get('button[aria-label="Start reading"]')).toBeTruthy()
+    expect(action.attributes('aria-label')).toBe('Read again')
+    expect(action.get('[data-testid="grid-card-primary-label"]').text()).toBe('Read')
+    expect(action.find('[data-testid="grid-card-primary-progress-label"]').exists()).toBe(false)
+    const statusMenu = wrapper.findAll('[data-test="dropdown-sub-content"]').find((menu) => menu.text().includes('Unread'))
+    const labels = statusMenu?.findAll('[data-test="dropdown-item"]').map((item) => item.text())
+    expect(labels).toContain('Finished')
+    expect(labels).not.toContain('Read')
   })
 
-  it('opens book details for missing books when thumbnail clicks prefer details', async () => {
-    thumbnailClickAction.value = 'details'
+  it('shows reading progress on the main action of a book under way', () => {
+    const wrapper = mountCard({ ...presentBook, readingProgress: 42 })
+    const action = wrapper.get('[data-testid="grid-card-primary-action"]')
+
+    expect(action.get('[data-testid="grid-card-primary-label"]').text()).toBe('Continue')
+    expect(action.get('[data-testid="grid-card-primary-progress-label"]').text()).toBe('42%')
+    expect(action.get('[data-testid="grid-card-primary-progress"]').attributes('style')).toContain('width: 42%')
+  })
+
+  it('offers book details as the main action when no file can be opened', async () => {
+    const wrapper = mountCard(missingBook)
+    const action = wrapper.get('[data-testid="grid-card-primary-action"]')
+
+    expect(action.attributes('aria-label')).toBe('Book Details')
+    await action.trigger('click')
+    expect(routerPushMock).toHaveBeenCalledWith({ name: 'book-detail', params: { bookId: 1 } })
+  })
+
+  it('opens book details for missing books on a card click', async () => {
     const wrapper = mountCard(missingBook)
 
     await wrapper.find('.group').trigger('click')
@@ -436,7 +445,6 @@ describe('BookCoverCard - present state', () => {
   })
 
   it('selects instead of navigating in selection mode', async () => {
-    thumbnailClickAction.value = 'details'
     const wrapper = mount(BookCoverCard, {
       props: { book: presentBook, selectionMode: true },
       global: {
@@ -487,9 +495,11 @@ describe('BookCoverCard - present state', () => {
     expect(fallbackAuthor.exists()).toBe(false)
   })
 
-  it('anchors the kebab menu button to the lower-right corner', () => {
-    const wrapper = mountCard(presentBook)
-    expect(wrapper.find('div.absolute.bottom-2.right-2.z-20').exists()).toBe(true)
+  it('keeps quick view and the actions menu in the dock beside the main action', () => {
+    const dock = mountCard(presentBook).get('[data-testid="grid-card-dock"]')
+    expect(dock.find('[data-testid="grid-card-primary-action"]').exists()).toBe(true)
+    expect(dock.find('[data-testid="grid-card-quick-view"]').exists()).toBe(true)
+    expect(dock.find('[data-testid="grid-card-dock-menu"]').exists()).toBe(true)
   })
 
   it('does not render a trailing separator when no post-status actions are visible', () => {
@@ -770,7 +780,6 @@ describe('BookCoverCard - opening in a new tab', () => {
   beforeEach(() => {
     routerResolveMock.mockClear()
     openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
-    thumbnailClickAction.value = 'details'
   })
 
   afterEach(() => {
@@ -821,11 +830,10 @@ describe('BookCoverCard - opening in a new tab', () => {
     expect(openSpy).not.toHaveBeenCalled()
   })
 
-  it('opens the reader in a new tab when a plain click would read the book', async () => {
-    thumbnailClickAction.value = 'reader'
+  it('opens the reader in a new tab from the main action on Ctrl+click', async () => {
     const wrapper = mountCard(presentBook)
 
-    await wrapper.get('.group').trigger('click', { ctrlKey: true })
+    await wrapper.get('[data-testid="grid-card-primary-action"]').trigger('click', { ctrlKey: true })
 
     expect(routerResolveMock).toHaveBeenCalledWith({
       name: 'reader',
@@ -872,15 +880,6 @@ describe('BookCoverCard - opening in a new tab', () => {
 
     expect(wrapper.emitted('select')).toHaveLength(1)
     expect(openSpy).not.toHaveBeenCalled()
-  })
-
-  it('opens details in a new tab from the centre action on Ctrl+click', async () => {
-    const wrapper = mountCard(presentBook)
-
-    await wrapper.get('[data-testid="grid-card-primary-action"]').trigger('click', { ctrlKey: true })
-
-    expect(openSpy).toHaveBeenCalledTimes(1)
-    expect(routerPushMock).not.toHaveBeenCalled()
   })
 
   it('offers Open in new tab in the actions menu', async () => {

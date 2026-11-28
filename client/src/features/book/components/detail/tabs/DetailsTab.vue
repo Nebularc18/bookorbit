@@ -37,10 +37,19 @@ import { createBookProviderLinks, createExternalProviderLinks } from '@/features
 import { useMetadataProviderLabels } from '@/features/book/composables/useMetadataProviderLabels'
 import { faceMedium } from '@/features/book/lib/cover-slots'
 import { readingDateToDateKey } from '@/features/book/lib/reading-date'
+import { readStatusLabel } from '@/features/book/lib/read-status-label'
 import { getProviderColor, providerShortLabel } from '@/lib/provider-colors'
 import { useCoverVersions } from '@/features/book/composables/useCoverVersions'
 import { useBookCoverAspectRatio } from '@/features/book/composables/useBookCoverAspectRatio'
-import { FORMAT_TO_GROUP, getPrimaryBookFile, Permission, READER_OPENABLE_FORMATS, isComicFormat, showsFirstPublished } from '@bookorbit/types'
+import {
+  FORMAT_TO_GROUP,
+  getPrimaryBookFile,
+  Permission,
+  READER_OPENABLE_FORMATS,
+  READ_STATUSES,
+  isComicFormat,
+  showsFirstPublished,
+} from '@bookorbit/types'
 import type {
   BookDetail,
   BookKoboState,
@@ -51,7 +60,7 @@ import type {
   ReadStatus,
   UserBookStatus,
 } from '@bookorbit/types'
-import { STATUS_OPTIONS, STATUS_ICONS, STATUS_COLORS, useBookStatus } from '@/features/book/composables/useBookStatus'
+import { STATUS_ICONS, STATUS_COLORS, useBookStatus } from '@/features/book/composables/useBookStatus'
 import BookDownloadButton from '@/features/book/components/BookDownloadButton.vue'
 import DiscoverRow from '@/features/book/components/detail/DiscoverRow.vue'
 import BookCoverArtwork from '@/features/book/components/BookCoverArtwork.vue'
@@ -91,6 +100,7 @@ import { useDisplaySettings } from '@/composables/useDisplaySettings'
 import HardcoverBookSyncGridItem from '@/features/hardcover/components/HardcoverBookSyncGridItem.vue'
 import StorygraphBookSyncGridItem from '@/features/storygraph/components/StorygraphBookSyncGridItem.vue'
 import BookEditionsCard, { type EditionProgress } from '@/features/book/components/detail/details/BookEditionsCard.vue'
+import HeroReadingProgress from '@/features/book/components/detail/details/HeroReadingProgress.vue'
 import BookReadingActivityCard from '@/features/book/components/detail/details/BookReadingActivityCard.vue'
 import ReadAloudSyncMeter from '@/features/book/components/detail/details/ReadAloudSyncMeter.vue'
 import StoryGuideCard from '@/features/story-guide/components/StoryGuideCard.vue'
@@ -103,6 +113,7 @@ import BookCoverStack from '@/features/book/components/detail/details/BookCoverS
 import ReadAloudInviteChip from '@/features/read-aloud/components/ReadAloudInviteChip.vue'
 import ReadAloudSparkles from '@/features/read-aloud/components/ReadAloudSparkles.vue'
 import { useReadAloudInvite } from '@/features/read-aloud/composables/useReadAloudInvite'
+import { seriesNameWithPosition } from '@/features/series/lib/series-unit-label'
 
 type FileProgress = {
   percentage: number
@@ -167,7 +178,6 @@ const linkSeedBooks = ref<LinkSeedBook[]>([])
 const linkBookIds = computed(() => linkSeedIds.value ?? [props.book.id])
 const linkExcludedIds = computed(() => linkedBooks.value.map((book) => book.bookId))
 const scoreBreakdownOpen = ref(false)
-const mobileScoreBreakdownOpen = ref(false)
 const moreMenuOpen = ref(false)
 const mobileMoreMenuOpen = ref(false)
 const readMenuOpen = ref(false)
@@ -419,10 +429,6 @@ function measureCoverLayout() {
 
 function toggleDescription() {
   descriptionExpanded.value = !descriptionExpanded.value
-}
-
-function handleMobileScoreOpen(open: boolean) {
-  mobileScoreBreakdownOpen.value = open
 }
 
 onMounted(() => {
@@ -1031,6 +1037,13 @@ const editionProgress = computed<EditionProgress[]>(() => {
   return [...byKey.values()]
 })
 
+/** The furthest part-read edition, shown beside the reading status. A book marked read or skimmed shows none. */
+const heroProgress = computed<number | null>(() => {
+  if (localReadStatus.value === 'read' || localReadStatus.value === 'skimmed') return null
+  const partial = editionProgress.value.filter((entry) => !entry.finished && entry.percentage > 0)
+  return partial.length ? Math.max(...partial.map((entry) => entry.percentage)) : null
+})
+
 function handleEditionReset(key: string) {
   const row = editionProgress.value.find((entry) => entry.key === key)
   if (row) void handleResetFileProgress(row)
@@ -1067,11 +1080,6 @@ const koboAnomaly = computed(() => {
   return null
 })
 
-function formatSeriesLabel(seriesName: string, seriesIndex: string | null): string {
-  if (seriesIndex == null) return seriesName
-  return `${seriesName} #${seriesIndex}`
-}
-
 const seriesLinks = computed<SeriesDisplayLink[]>(() => {
   const memberships = props.book.seriesMemberships ?? []
   if (memberships.length > 0) {
@@ -1082,7 +1090,7 @@ const seriesLinks = computed<SeriesDisplayLink[]>(() => {
       .map((membership) => ({
         key: `${membership.seriesId}-${membership.displayOrder}`,
         seriesId: membership.seriesId,
-        label: formatSeriesLabel(membership.seriesName, membership.seriesIndex),
+        label: seriesNameWithPosition(t, membership.seriesName, membership.seriesIndex, membership.unit, membership.volumeIndex),
       }))
   }
 
@@ -1091,7 +1099,7 @@ const seriesLinks = computed<SeriesDisplayLink[]>(() => {
     {
       key: `primary-${props.book.seriesId ?? 'unknown'}`,
       seriesId: props.book.seriesId ?? null,
-      label: formatSeriesLabel(props.book.seriesName, props.book.seriesIndex),
+      label: seriesNameWithPosition(t, props.book.seriesName, props.book.seriesIndex, null),
     },
   ]
 })
@@ -1597,31 +1605,23 @@ watch(
             </template>
           </div>
           <div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
-            <Popover :open="mobileScoreBreakdownOpen" @update:open="handleMobileScoreOpen">
-              <PopoverTrigger as-child>
-                <MetadataScoreBadge :score="book.metadataScore" />
-              </PopoverTrigger>
-              <PopoverContent class="w-72 p-4" align="start">
-                <p class="mb-3 text-sm font-semibold">{{ t('book.detail.details.metadataScore') }}</p>
-                <MetadataScoreBreakdown :book="book" :weights="scoreWeights" @edit-metadata="handleEditMetadataFromScore" />
-              </PopoverContent>
-            </Popover>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
                 <button class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
                   <component :is="STATUS_ICONS[localReadStatus ?? 'unread']" class="size-3.5" :class="STATUS_COLORS[localReadStatus ?? 'unread']" />
-                  {{ STATUS_OPTIONS.find((o) => o.value === (localReadStatus ?? 'unread'))?.label }}
+                  {{ readStatusLabel(localReadStatus ?? 'unread') }}
                   <ChevronDown class="size-3 opacity-60" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
-                <DropdownMenuItem v-for="opt in STATUS_OPTIONS" :key="opt.value" @click="handleSetReadStatus(opt.value)">
-                  <component :is="STATUS_ICONS[opt.value]" class="mr-2 size-4" :class="STATUS_COLORS[opt.value]" />
-                  {{ opt.label }}
-                  <Check v-if="localReadStatus === opt.value" class="ml-auto size-3 text-primary" />
+                <DropdownMenuItem v-for="status in READ_STATUSES" :key="status" @click="handleSetReadStatus(status)">
+                  <component :is="STATUS_ICONS[status]" class="mr-2 size-4" :class="STATUS_COLORS[status]" />
+                  {{ readStatusLabel(status) }}
+                  <Check v-if="localReadStatus === status" class="ml-auto size-3 text-primary" />
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <HeroReadingProgress v-if="heroProgress !== null" :percentage="heroProgress" />
           </div>
         </div>
       </div>
@@ -1824,18 +1824,7 @@ watch(
     >
       <div class="hidden @min-[46rem]/book-detail:block">
         <!-- Identity block -->
-        <div class="flex items-center flex-wrap gap-x-3 gap-y-2 -mt-1">
-          <h1 class="text-2xl font-bold leading-tight">{{ book.title ?? t('book.detail.details.untitled') }}</h1>
-          <Popover :open="scoreBreakdownOpen" @update:open="(v) => (scoreBreakdownOpen = v)">
-            <PopoverTrigger as-child>
-              <MetadataScoreBadge :score="book.metadataScore" />
-            </PopoverTrigger>
-            <PopoverContent class="w-72 p-4" align="start">
-              <p class="text-sm font-semibold mb-3">{{ t('book.detail.details.metadataScore') }}</p>
-              <MetadataScoreBreakdown :book="book" :weights="scoreWeights" @edit-metadata="handleEditMetadataFromScore" />
-            </PopoverContent>
-          </Popover>
-        </div>
+        <h1 class="-mt-1 text-2xl font-bold leading-tight">{{ book.title ?? t('book.detail.details.untitled') }}</h1>
         <p v-if="book.subtitle" class="text-base text-muted-foreground mt-1 leading-snug">{{ book.subtitle }}</p>
         <EditionStrip v-if="editions.length > 1" :editions="editions" class="mt-2" @show-all="handleShowAllEditions" />
 
@@ -1914,18 +1903,19 @@ watch(
             <DropdownMenuTrigger as-child>
               <button class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
                 <component :is="STATUS_ICONS[localReadStatus ?? 'unread']" class="size-3.5" :class="STATUS_COLORS[localReadStatus ?? 'unread']" />
-                {{ STATUS_OPTIONS.find((o) => o.value === (localReadStatus ?? 'unread'))?.label }}
+                {{ readStatusLabel(localReadStatus ?? 'unread') }}
                 <ChevronDown class="size-3 opacity-60" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              <DropdownMenuItem v-for="opt in STATUS_OPTIONS" :key="opt.value" @click="handleSetReadStatus(opt.value)">
-                <component :is="STATUS_ICONS[opt.value]" class="size-4 mr-2" :class="STATUS_COLORS[opt.value]" />
-                {{ opt.label }}
-                <Check v-if="localReadStatus === opt.value" class="size-3 ml-auto text-primary" />
+              <DropdownMenuItem v-for="status in READ_STATUSES" :key="status" @click="handleSetReadStatus(status)">
+                <component :is="STATUS_ICONS[status]" class="size-4 mr-2" :class="STATUS_COLORS[status]" />
+                {{ readStatusLabel(status) }}
+                <Check v-if="localReadStatus === status" class="size-3 ml-auto text-primary" />
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <HeroReadingProgress v-if="heroProgress !== null" :percentage="heroProgress" class="ms-2" />
 
           <div class="w-px h-3.5 bg-border mx-1.5" />
 
@@ -2282,9 +2272,20 @@ watch(
         class="flex min-h-0 flex-col rounded-xl border border-border bg-card px-4 pt-3 pb-2"
         :aria-label="t('book.detail.details.detailsHeading')"
       >
-        <h3 class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {{ t('book.detail.details.detailsHeading') }}
-        </h3>
+        <div class="mb-1 flex items-center justify-between gap-3">
+          <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {{ t('book.detail.details.detailsHeading') }}
+          </h3>
+          <Popover v-if="book.metadataScore !== null" v-model:open="scoreBreakdownOpen">
+            <PopoverTrigger as-child>
+              <MetadataScoreBadge :score="book.metadataScore" class="-me-1.5" />
+            </PopoverTrigger>
+            <PopoverContent class="w-72 p-4" align="end">
+              <p class="mb-3 text-sm font-semibold">{{ t('book.detail.details.metadataScore') }}</p>
+              <MetadataScoreBreakdown :book="book" :weights="scoreWeights" @edit-metadata="handleEditMetadataFromScore" />
+            </PopoverContent>
+          </Popover>
+        </div>
 
         <dl class="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <div class="flex items-baseline justify-between gap-3 border-b border-border py-[6px] last:border-b-0">

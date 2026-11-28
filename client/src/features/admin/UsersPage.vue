@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Search, TriangleAlert, UserPlus, X } from '@lucide/vue'
-import { Permission, type DefaultLibraryAccessConfig, type UserListSortField, type UserListState } from '@bookorbit/types'
+import { Permission, type DefaultLibraryAccessConfig, type PasswordResetLink, type UserListSortField, type UserListState } from '@bookorbit/types'
 
 import { Button } from '@/components/ui/button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -15,6 +15,9 @@ import { useUsers, type UserRow } from './composables/useUsers'
 import { useSelfRegistration } from './composables/useSelfRegistration'
 import UserFormDrawer from './UserFormDrawer.vue'
 import ResetLinkModal from './ResetLinkModal.vue'
+import InvitationLifetimeCard from './components/InvitationLifetimeCard.vue'
+import StartingPermissionsCard from './components/StartingPermissionsCard.vue'
+import { useStartingPermissions } from './composables/useStartingPermissions'
 import NewAccountDefaults from './components/NewAccountDefaults.vue'
 import UserAttentionBand from './components/UserAttentionBand.vue'
 import UserRosterCards from './components/UserRosterCards.vue'
@@ -57,9 +60,16 @@ const {
   markDefaultLibrariesSaved,
 } = useUsers()
 
+const {
+  saved: startingPermissions,
+  error: permissionsError,
+  busy: permissionsBusy,
+  load: loadPermissions,
+  save: savePermissions,
+} = useStartingPermissions()
 const drawerOpen = ref(false)
 const editingUser = ref<UserRow | null>(null)
-const resetUrl = ref<string | null>(null)
+const resetLink = ref<PasswordResetLink | null>(null)
 const deleteConfirmUser = ref<UserRow | null>(null)
 const superuserConfirm = ref<{ user: UserRow; isSuperuser: boolean } | null>(null)
 const deleting = ref(false)
@@ -123,7 +133,7 @@ const superuserConfirmLabel = computed(() => {
 
 onMounted(async () => {
   headerSlotAvailable.value = document.getElementById(HEADER_ACTIONS_TARGET.slice(1)) !== null
-  await Promise.all([reload(), loadStatic(), fetchLoginOptions().catch(() => undefined)])
+  await Promise.all([reload(), loadStatic(), canManageUserDefaults.value ? loadPermissions() : undefined, fetchLoginOptions().catch(() => undefined)])
   if (canManageAppSettings.value) await loadSelfRegistration()
 })
 
@@ -181,8 +191,8 @@ function closeDrawer() {
   drawerOpen.value = false
 }
 
-function clearResetUrl() {
-  resetUrl.value = null
+function clearResetLink() {
+  resetLink.value = null
 }
 
 function canManage(user: UserRow): boolean {
@@ -227,8 +237,7 @@ async function handleResetPassword(userId: number) {
       actionError.value = t('adminFeature.usersPage.errors.resetPassword')
       return
     }
-    const data = await res.json()
-    resetUrl.value = data.resetUrl
+    resetLink.value = await res.json()
     await reload()
   } finally {
     busyUserId.value = null
@@ -317,9 +326,9 @@ async function confirmDeleteUser() {
   }
 }
 
-async function onSaved(newResetUrl?: string) {
+async function onSaved(newResetLink?: PasswordResetLink) {
   drawerOpen.value = false
-  if (newResetUrl) resetUrl.value = newResetUrl
+  if (newResetLink) resetLink.value = newResetLink
   await reload()
 }
 
@@ -365,7 +374,7 @@ async function saveDefaultLibraryAccess() {
   <div class="space-y-4">
     <Teleport :to="HEADER_ACTIONS_TARGET" defer :disabled="!headerSlotAvailable">
       <p class="hidden text-sm text-muted-foreground lg:block">{{ pageSubtitle }}</p>
-      <Button size="sm" type="button" @click="openCreate">
+      <Button size="sm" type="button" :disabled="!startingPermissions" @click="openCreate">
         <UserPlus :size="14" aria-hidden="true" />
         {{ passwordLoginEnabled ? t('adminFeature.usersPage.createUser') : t('adminFeature.userForm.createSharedAccount') }}
       </Button>
@@ -519,13 +528,25 @@ async function saveDefaultLibraryAccess() {
       @toggle-self-registration="toggleSelfRegistration"
       @toggle-library="toggleDefaultLibrary"
       @save-library-defaults="saveDefaultLibraryAccess"
-    />
+    >
+      <StartingPermissionsCard
+        v-if="canManageUserDefaults"
+        :saved="startingPermissions"
+        :save="savePermissions"
+        :busy="permissionsBusy"
+        :error="permissionsError"
+        @retry="loadPermissions"
+      />
+      <InvitationLifetimeCard v-if="canManageUserDefaults && passwordLoginEnabled" />
+    </NewAccountDefaults>
 
     <UserFormDrawer
       v-if="drawerOpen"
       :user="editingUser"
       :libraries="libraries"
       :default-library-ids="defaultLibraryIdsArray"
+      :starting-permissions="startingPermissions ?? undefined"
+      :can-manage-recipients="canManageUserDefaults && (!editingUser?.isSuperuser || isSuperuser)"
       :can-manage-superuser="isSuperuser"
       :current-user-id="currentUser?.id"
       :can-delete="canDeleteEditingUser"
@@ -536,7 +557,7 @@ async function saveDefaultLibraryAccess() {
       @request-superuser-change="requestSuperuserChange"
       @delete="handleDrawerDelete"
     />
-    <ResetLinkModal v-if="resetUrl" :reset-url="resetUrl" @close="clearResetUrl" />
+    <ResetLinkModal v-if="resetLink" :reset-url="resetLink.resetUrl" :reset-link-expires-at="resetLink.resetLinkExpiresAt" @close="clearResetLink" />
 
     <ConfirmDialog
       :open="deleteConfirmUser !== null"

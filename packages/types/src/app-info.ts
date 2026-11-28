@@ -131,6 +131,39 @@ export const SERVER_FEATURES = [
    * `collapseLinked`; series and author summaries carry `workCount`.
    */
   "book-editions",
+  /**
+   * Book filters accept the `hasGaps` operator on the `seriesStatus` field: books in a series the
+   * Series page lists under Gaps.
+   */
+  "series-gaps-filter",
+  /** Book filters accept `storyArc` and `GET /metadata/story-arcs` suggests visible arc names. */
+  "story-arc-filter",
+  /**
+   * Series books carry a unit (volume, chapter, issue or null). Series orders list volumes and
+   * unclassified books before chapters and issues; next-in-series stays within the unit class of the
+   * book being read. `GET /series/:id/books` accepts `unit=volume|chapter` (chapter includes issue);
+   * `seriesInfo` carries `unitCounts` and `chapterGaps`, and `possibleGaps` covers volumes only.
+   * Book cards carry `seriesUnit`, memberships carry `unit` and `volumeIndex`, series summaries carry
+   * `unitCounts`, `chapterReadCount`, `chapterGaps`, `chapterGapCount` and `nextUnit`, and
+   * `SeriesNextBook` carries `seriesUnit`. Metadata updates accept `unit` on each series membership.
+   */
+  "series-units",
+  /**
+   * Chapters and issues are ordered run by run: by `volumeIndex`, then number, with chapters that
+   * name no volume after every run, so v2 #1, v2 #2, v3 #1. Next-in-series, counts, the ladder and
+   * gaps follow runs; a chapter line with several runs reports its gaps only in
+   * `chapterGapPositions`. Book cards carry `seriesVolumeIndex`, ladder slots `volumeIndex`, series
+   * summaries `nextVolumeIndex`, `chapterGapPositions` and `chapterGapPositionCount`, `seriesInfo`
+   * `chapterGapPositions`, and `SeriesNextBook` `seriesVolumeIndex`. Metadata updates accept
+   * `volumeIndex` on each series membership; leaving it out keeps the stored one.
+   */
+  "series-runs",
+  /**
+   * `POST .../book-requests/:id/upload/plan` describes picked files, `POST .../:id/upload` starts an
+   * `upload` attempt, `GET .../:id/upload` reads its manifest, and upload sessions accept a
+   * `book_request` target. Download items carry `uploadedByName` and the upload's file counts.
+   */
+  "book-request-upload",
 ] as const;
 
 export type ServerFeature = (typeof SERVER_FEATURES)[number];

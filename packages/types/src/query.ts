@@ -26,7 +26,8 @@ import type { CommunityRatingProviderKey } from "./metadata-fetch";
  * - `cover` - either cover slot filled (`book_metadata.cover_source` is the summary of both)
  * - `audioCover` - books whose cover media include audio, by whether their audio cover slot is filled
  * - `lockStatus` - derived from `book_metadata.locked_fields` (non-empty array = locked)
- * - `seriesStatus` - computed per-user: "up next in series" (next unstarted book whose earlier series entries are all finished)
+ * - `seriesStatus` - `isUpNext` is computed per-user: "up next in series" (next unstarted book whose earlier series entries are all finished);
+ *   `hasGaps` matches books in a series the Series page lists under Gaps, judged over the books the query can see
  *
  * User-defined custom metadata fields are filterable too, as `CustomRuleField`.
  */
@@ -42,6 +43,7 @@ export type StaticRuleField =
   | "pageCount"
   | "author"
   | "authorGender"
+  | "storyArc"
   | "genre"
   | "tag"
   | "collection"
@@ -108,6 +110,7 @@ export type RuleOperator =
   | "isLocked"
   | "isUnlocked"
   | "isUpNext"
+  | "hasGaps"
   | "isTrue"
   | "isFalse";
 
@@ -118,6 +121,7 @@ export const FIELD_OPERATORS: Record<StaticRuleField, RuleOperator[]> = {
   series: ["contains", "notContains", "eq", "notEq", "includesAny", "excludesAll", "isEmpty", "isNotEmpty"],
   author: ["includesAny", "includesAll", "excludesAll", "isEmpty", "isNotEmpty"],
   authorGender: ["includesAny", "excludesAll", "isEmpty", "isNotEmpty"],
+  storyArc: ["includesAny", "includesAll", "excludesAll", "isEmpty", "isNotEmpty"],
   genre: ["includesAny", "includesAll", "excludesAll", "isEmpty", "isNotEmpty"],
   tag: ["includesAny", "includesAll", "excludesAll", "isEmpty", "isNotEmpty"],
   collection: ["includesAny", "excludesAll", "isEmpty", "isNotEmpty"],
@@ -145,7 +149,7 @@ export const FIELD_OPERATORS: Record<StaticRuleField, RuleOperator[]> = {
   cover: ["isMissing", "isPresent"],
   audioCover: ["isMissing", "isPresent"],
   lockStatus: ["isLocked", "isUnlocked"],
-  seriesStatus: ["isUpNext"],
+  seriesStatus: ["isUpNext", "hasGaps"],
 };
 
 export const RULE_FIELDS = Object.keys(FIELD_OPERATORS) as StaticRuleField[];
@@ -201,6 +205,7 @@ export const RULE_OPERATORS: RuleOperator[] = [
   "isLocked",
   "isUnlocked",
   "isUpNext",
+  "hasGaps",
   "isTrue",
   "isFalse",
 ];

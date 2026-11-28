@@ -300,8 +300,11 @@ export const readingSessions = pgTable(
     userId: integer('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    // Nullable: manual sessions are book-level and have no file.
+    // Nullable: manual sessions are book-level and have no file, and a deleted file's sessions are
+    // kept book-level when its delete retains them (see `deleteBookFilesWithHashInvalidation`).
     bookFileId: integer('book_file_id').references(() => bookFiles.id, { onDelete: 'cascade' }),
+    // The deleted file's format, written when the session outlives its file.
+    fileFormatSnapshot: varchar('file_format_snapshot', { length: 20 }),
     bookId: integer('book_id')
       .notNull()
       .references(() => books.id, { onDelete: 'cascade' }),
@@ -608,7 +611,7 @@ export const annotationPositions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     bookFileId: integer('book_file_id').references(() => bookFiles.id, { onDelete: 'set null' }),
-    format: varchar('format', { length: 12 }).$type<'cfi' | 'xpointer' | 'pdf' | 'kobo_span'>().notNull(),
+    format: varchar('format', { length: 12 }).$type<'cfi' | 'xpointer' | 'pdf' | 'kobo_span' | 'page'>().notNull(),
     pos0: text('pos0'),
     pos1: text('pos1'),
     // exact: structurally resolved and text-verified; repaired: re-anchored via text search;
@@ -627,7 +630,7 @@ export const annotationPositions = pgTable(
     index('annotation_positions_user_idx').on(t.userId),
     index('annotation_positions_book_file_id_idx').on(t.bookFileId),
     index('annotation_positions_format_status_idx').on(t.format, t.status),
-    check('annotation_positions_format_chk', sql`${t.format} in ('cfi', 'xpointer', 'pdf', 'kobo_span')`),
+    check('annotation_positions_format_chk', sql`${t.format} in ('cfi', 'xpointer', 'pdf', 'kobo_span', 'page')`),
     check('annotation_positions_status_chk', sql`${t.status} in ('exact', 'repaired', 'failed', 'pending')`),
     check('annotation_positions_pos0_chk', sql`${t.status} in ('failed', 'pending') or ${t.pos0} is not null`),
   ],

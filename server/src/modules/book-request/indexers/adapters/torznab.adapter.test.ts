@@ -133,7 +133,7 @@ describe('TorznabAdapter', () => {
     expect(url.pathname).toBe('/api/v2.0/indexers/all/results/torznab/api');
     expect(url.searchParams.get('t')).toBe('search');
     expect(url.searchParams.get('apikey')).toBe('secret-key');
-    expect(url.searchParams.get('cat')).toBe('7020');
+    expect(url.searchParams.get('cat')).toBe('7020,7030');
     // The ISBN is not in the query text: trackers do not index it, and it is a scoring signal.
     expect(url.searchParams.get('q')).toBe('Dune Frank Herbert');
   });
@@ -200,6 +200,21 @@ describe('TorznabAdapter', () => {
     });
     // `peers` counts seeders, so leechers is the difference and not the raw 50.
     expect(release.leechers).toBe(8);
+  });
+
+  it.each([
+    ['MyAnonamouse', 'Dune by Frank Herbert [EN / EPUB] [VIP]', true],
+    ['MyAnonamouse', 'Dune [VIP] by Frank Herbert [EN / EPUB]', undefined],
+    ['Cardigann', 'Dune by Frank Herbert [EN / EPUB] [VIP]', undefined],
+    [undefined, 'Dune by Frank Herbert [EN / EPUB] [VIP]', undefined],
+  ] as const)('reads the trailing VIP flag only on managed MAM feeds (%s, %s)', async (managerImplementation, title, vipOnly) => {
+    fetchMock.mockResolvedValue(new Response(feed(ITEM.replace('Dune - Frank Herbert (retail) [EPUB]', title))));
+
+    const [release] = await new TorznabAdapter().search(query(), config({ managerImplementation }), AbortSignal.timeout(1000));
+
+    expect(release.title).toBe(title);
+    expect(release.vipOnly).toBe(vipOnly);
+    expect(release.freeleech).toBe(true);
   });
 
   /**

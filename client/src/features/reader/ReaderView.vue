@@ -74,6 +74,8 @@ const isAudioFormat = getFormatGroup(fileFormat) === 'audio'
 const isPdfFormat = fileFormat === 'pdf'
 const isDjvuFormat = normalizedFileFormat === 'djvu'
 const isComicFormat = fileFormat === 'cbz' || fileFormat === 'cbr' || fileFormat === 'cb7' || isDjvuFormat
+// PDF, comic and audiobook files open in their own readers, which own their lifecycle and their keys.
+const isSpecializedReader = isAudioFormat || isPdfFormat || isComicFormat
 const pageImageSource = isDjvuFormat ? 'djvu' : 'cbz'
 const isPeekMode = computed(() => {
   const mode = route.query.mode
@@ -160,7 +162,27 @@ const search = useSearch()
 const { results: searchResults, isSearching, search: doSearch, clear: clearSearch } = search
 
 const selection = useReaderSelection()
-const { isSidebarPinned, toggleSidebarPinned, shouldCloseAfterNavigation } = useReaderSidebarPin(fileId)
+const { canPinSidebar, isSidebarPinned, toggleSidebarPinned, shouldCloseAfterNavigation } = useReaderSidebarPin(fileId)
+
+function toggleSidebar() {
+  showSidebar.value = !showSidebar.value
+}
+
+function closeSidebar() {
+  showSidebar.value = false
+}
+
+function goBack() {
+  router.back()
+}
+
+function toggleSearch() {
+  showSearch.value = !showSearch.value
+}
+
+function toggleTapZones() {
+  showTapZones.value = !showTapZones.value
+}
 
 async function toggleBookmark() {
   const wasBookmarked = bookmarks.isCurrentCfiBookmarked.value
@@ -178,7 +200,7 @@ function closeAnyPanel() {
   } else if (showSearch.value) {
     closeSearch()
   } else if (showSidebar.value) {
-    showSidebar.value = false
+    closeSidebar()
   } else if (showSettings.value) {
     showSettings.value = false
   } else {
@@ -186,20 +208,19 @@ function closeAnyPanel() {
   }
 }
 
-const { showHelpModal } = useReaderKeyboardShortcuts({
-  toggleSidebar: () => {
-    showSidebar.value = !showSidebar.value
+const { showHelpModal } = useReaderKeyboardShortcuts(
+  {
+    toggleSidebar,
+    toggleSearch,
+    toggleBookmark: handleToggleBookmark,
+    toggleFullscreen,
+    cycleFooterMode,
+    closePanel: closeAnyPanel,
+    goToStart: () => navigateToFraction(0),
+    goToEnd: () => navigateToFraction(1),
   },
-  toggleSearch: () => {
-    showSearch.value = !showSearch.value
-  },
-  toggleBookmark: handleToggleBookmark,
-  toggleFullscreen,
-  cycleFooterMode,
-  closePanel: closeAnyPanel,
-  goToStart: () => navigateToFraction(0),
-  goToEnd: () => navigateToFraction(1),
-})
+  { enabled: !isSpecializedReader },
+)
 
 function toggleHelpModal() {
   showHelpModal.value = !showHelpModal.value
@@ -942,8 +963,7 @@ setAnnotationClickHandler(handleAnnotationClick)
 onUnmounted(clearFoliateSource)
 
 onMounted(async () => {
-  // Specialized readers own their own progress/settings/loading lifecycle.
-  if (isAudioFormat || isPdfFormat || isComicFormat) return
+  if (isSpecializedReader) return
 
   if (isTtsAvailable) void loadUserPreferences().catch(() => {})
 
@@ -1246,13 +1266,21 @@ function navigateToSection(targetSection: number) {
   return goToSection(targetSection)
 }
 
+function navigatePreviousSection() {
+  navigateToSection(sectionIndex.value - 1)
+}
+
+function navigateNextSection() {
+  navigateToSection(sectionIndex.value + 1)
+}
+
 function navigateSearch(cfiTarget: string) {
   navigateToTarget(cfiTarget)
 }
 
 function closeSidebarAfterNavigation() {
   if (shouldCloseAfterNavigation()) {
-    showSidebar.value = false
+    closeSidebar()
   }
 }
 
@@ -1292,6 +1320,10 @@ watch(showSidebar, (open) => {
   }
 })
 
+watch(isSidebarPinned, (pinned, wasPinned) => {
+  if (wasPinned && !pinned && !canPinSidebar.value) closeSidebar()
+})
+
 watch(
   () => [bookmarks.bookmarks.value.map((bm) => bm.cfi).join('|'), annotations.annotations.value.map((ann) => ann.cfi).join('|')],
   () => {
@@ -1316,56 +1348,56 @@ onUnmounted(() => {
   <AudiobookReaderView v-else-if="isAudioFormat" :bookId="bookId" :fileId="fileId" :peek-mode="isPeekMode" />
   <div
     v-else
-    class="fixed inset-0 overflow-hidden"
+    class="fixed inset-0 flex overflow-hidden"
     :style="
       shouldApplyStyles ? { background: activeMode.bg, colorScheme: isDark ? 'dark' : 'light' } : { background: '#ffffff', colorScheme: 'light' }
     "
   >
-    <ReaderHeader
-      :chapterTitle="chapterTitle"
-      :isBookmarked="bookmarks.isCurrentCfiBookmarked.value"
-      :settings-open="showSettings"
-      :footerMode="footerMode"
-      :peek-mode="isPeekMode"
-      :isTtsActive="isTtsActive || (mediaOverlay.isActive.value && mediaOverlay.isPlaying.value)"
-      :isTtsAvailable="isTtsAvailable"
-      :isMediaOverlay="isMediaOverlayAvailable"
-      :isPinned="isPinned"
-      :showTapZones="showTapZones"
-      class="transition-all duration-300"
-      :class="headerVisible && !showTapZones ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'"
-      @back="router.back()"
-      @toggleSidebar="showSidebar = !showSidebar"
-      @toggleSearch="showSearch = !showSearch"
-      @toggleBookmark="handleToggleBookmark"
-      @update:settings-open="setSettingsOpen"
-      @toggleFullscreen="toggleFullscreen"
-      @toggleHelp="toggleHelpModal"
-      @cycleFooterMode="cycleFooterMode"
-      @startReading="startTrackedReading"
-      @startTts="handleStartListen"
-      @togglePin="togglePinned"
-      @toggleTapZones="showTapZones = !showTapZones"
-    >
-      <template #settingsPanel>
-        <ReaderSettingsPanel
-          :state="state"
-          :customFonts="customFonts"
-          :is-fixed-layout="isFixedLayout"
-          :can-reset="bookSettings.isCustomized.value"
-          @update="applyUpdate"
-          @reset="resetSettings"
-        />
-      </template>
-    </ReaderHeader>
+    <div class="relative isolate min-w-0 flex-1">
+      <ReaderHeader
+        :chapterTitle="chapterTitle"
+        :isBookmarked="bookmarks.isCurrentCfiBookmarked.value"
+        :settings-open="showSettings"
+        :footerMode="footerMode"
+        :peek-mode="isPeekMode"
+        :isTtsActive="isTtsActive || (mediaOverlay.isActive.value && mediaOverlay.isPlaying.value)"
+        :isTtsAvailable="isTtsAvailable"
+        :isMediaOverlay="isMediaOverlayAvailable"
+        :isPinned="isPinned"
+        :showTapZones="showTapZones"
+        class="transition-all duration-300 motion-reduce:transition-none"
+        :class="headerVisible && !showTapZones ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-full pointer-events-none'"
+        @back="goBack"
+        @toggleSidebar="toggleSidebar"
+        @toggleSearch="toggleSearch"
+        @toggleBookmark="handleToggleBookmark"
+        @update:settings-open="setSettingsOpen"
+        @toggleFullscreen="toggleFullscreen"
+        @toggleHelp="toggleHelpModal"
+        @cycleFooterMode="cycleFooterMode"
+        @startReading="startTrackedReading"
+        @startTts="handleStartListen"
+        @togglePin="togglePinned"
+        @toggleTapZones="toggleTapZones"
+      >
+        <template #settingsPanel>
+          <ReaderSettingsPanel
+            :state="state"
+            :customFonts="customFonts"
+            :is-fixed-layout="isFixedLayout"
+            :can-reset="bookSettings.isCustomized.value"
+            @update="applyUpdate"
+            @reset="resetSettings"
+          />
+        </template>
+      </ReaderHeader>
 
-    <Transition name="bookmark-fade">
-      <div v-if="bookmarks.isCurrentCfiBookmarked.value" class="absolute left-8 z-30 pointer-events-none" aria-hidden="true">
-        <div class="w-7 h-14 bg-primary" style="clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%)" />
-      </div>
-    </Transition>
+      <Transition name="bookmark-fade">
+        <div v-if="bookmarks.isCurrentCfiBookmarked.value" class="absolute start-8 z-30 pointer-events-none" aria-hidden="true">
+          <div class="w-7 h-14 bg-primary" style="clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%)" />
+        </div>
+      </Transition>
 
-    <div class="absolute inset-0">
       <div v-if="loading" class="absolute inset-0 flex items-center justify-center z-10 bg-background">
         <div class="flex flex-col items-center gap-3">
           <div class="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
@@ -1633,23 +1665,23 @@ onUnmounted(() => {
           </div>
         </div>
       </Transition>
-    </div>
 
-    <ReaderFooter
-      :fraction="fraction"
-      :sectionIndex="sectionIndex"
-      :totalSections="totalSections"
-      :sectionFractions="sectionFractions"
-      :chapterStartFraction="chapterStartFraction"
-      :chapterEndFraction="chapterEndFraction"
-      :locationTotal="locationTotal"
-      :navigationLocked="isNavigationLocked"
-      class="transition-all duration-300"
-      :class="footerVisible && !showTapZones ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-full pointer-events-none'"
-      @prevSection="navigateToSection(sectionIndex - 1)"
-      @nextSection="navigateToSection(sectionIndex + 1)"
-      @seek="navigateToFraction($event)"
-    />
+      <ReaderFooter
+        :fraction="fraction"
+        :sectionIndex="sectionIndex"
+        :totalSections="totalSections"
+        :sectionFractions="sectionFractions"
+        :chapterStartFraction="chapterStartFraction"
+        :chapterEndFraction="chapterEndFraction"
+        :locationTotal="locationTotal"
+        :navigationLocked="isNavigationLocked"
+        class="transition-all duration-300 motion-reduce:transition-none"
+        :class="footerVisible && !showTapZones ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-full pointer-events-none'"
+        @prevSection="navigatePreviousSection"
+        @nextSection="navigateNextSection"
+        @seek="navigateToFraction"
+      />
+    </div>
 
     <ReaderSidebar
       v-if="showSidebar"
@@ -1660,9 +1692,10 @@ onUnmounted(() => {
       :locationMetaByCfi="sidebarLocationMetaByCfi"
       :activeHref="activeHref"
       :expandedHrefs="expandedHrefs"
+      :canPin="canPinSidebar"
       :pinned="isSidebarPinned"
       :navigationLocked="isNavigationLocked"
-      @close="showSidebar = false"
+      @close="closeSidebar"
       @togglePinned="toggleSidebarPinned"
       @navigateChapter="navigateChapterFromSidebar"
       @navigateBookmark="navigateFromSidebar"

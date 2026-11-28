@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { AnyColumn, SQL, and, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, not, or, sql } from 'drizzle-orm';
+import { AnyColumn, SQL, and, arrayContains, arrayOverlaps, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, not, or, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import {
@@ -23,10 +23,18 @@ import type {
 } from '@bookorbit/types';
 import { DB } from '../../db';
 import { bookLastReadAtSql } from '../../db/book-last-read';
+import { seriesHasGapsSql } from '../../db/series-gaps-sql';
 import { isDateKey, resolveTimeZone, toDateKeyInTimeZone } from '../../common/utils/timezone.utils';
 import { buildContentFilterClauses } from '../../common/utils/content-filter-sql.utils';
 import { accentInsensitiveIlike, buildSearchPattern, escapeLikePattern } from '../../common/utils/accent-insensitive-search.utils';
-import { compareSeriesIndexSql, seriesIndexSortKey, seriesIndexSortKeySql } from '../../common/utils/series-index-sql.utils';
+import {
+  compareSeriesIndexSql,
+  seriesIndexSortKey,
+  seriesIndexSortKeySql,
+  seriesVolumeSortKey,
+  seriesVolumeSortKeySql,
+} from '../../common/utils/series-index-sql.utils';
+import { seriesUnitRank, seriesUnitRankSql } from '../../common/utils/series-unit.utils';
 import * as schema from '../../db/schema';
 import { activeCoverSlotSql, coverMediaSql } from '../book-cover-store/book-cover-store.repository';
 import { BookSortBuilder, customMetadataValueColumn, resolveRandomSortSeed, type BookSortContext } from './book-sort-builder.service';
@@ -48,6 +56,7 @@ import {
   bookTags,
   collectionBooks,
   collections,
+  comicMetadata,
   readingProgress,
   userBookRatings,
   userBookStatus,
@@ -58,6 +67,15 @@ import {
 } from '../../db/schema';
 
 type Db = NodePgDatabase<typeof schema>;
+
+/** What a rule can see beyond its own fields: who is asking and which books the query is limited to. */
+type RuleContext = {
+  userId?: number;
+  timeZone: string;
+  accessibleLibraryIds: number[];
+  implicitLibraryId?: number;
+  contentFilters?: ContentFilterRules;
+};
 
 @Injectable()
 export class BookQueryBuilder {
@@ -89,7 +107,15 @@ export class BookQueryBuilder {
     }
 
     if (filter) {
-      clauses.push(this.groupToSql(filter, 0, ctx.userId, timeZone));
+      clauses.push(
+        this.groupToSql(filter, 0, {
+          userId: ctx.userId,
+          timeZone,
+          accessibleLibraryIds: ctx.accessibleLibraryIds,
+          implicitLibraryId: ctx.implicitLibraryId,
+          contentFilters: ctx.contentFilters,
+        }),
+      );
     }
 
     if (ctx.q?.trim()) {
@@ -147,15 +173,14 @@ export class BookQueryBuilder {
     return this.sortBuilder.build(sort, userId, customFieldTypes, context);
   }
 
-  private groupToSql(node: GroupRule, depth: number, userId?: number, timeZone = 'UTC'): SQL {
+  private groupToSql(node: GroupRule, depth: number, ctx: RuleContext): SQL {
     if (depth > 5) throw new BadRequestException('Filter nesting exceeds maximum depth of 5');
-    const clauses = node.rules.map((r) =>
-      r.type === 'group' ? this.groupToSql(r, depth + 1, userId, timeZone) : this.ruleToSql(r, userId, timeZone),
-    );
+    const clauses = node.rules.map((r) => (r.type === 'group' ? this.groupToSql(r, depth + 1, ctx) : this.ruleToSql(r, ctx)));
     return node.join === 'AND' ? and(...clauses)! : or(...clauses)!;
   }
 
-  private ruleToSql(rule: Rule, userId?: number, timeZone = 'UTC'): SQL {
+  private ruleToSql(rule: Rule, ctx: RuleContext): SQL {
+    const { userId, timeZone } = ctx;
     const { field, operator, value, valueTo } = rule;
     const customFieldId = parseCustomRuleFieldId(field);
     if (customFieldId !== null) {
@@ -209,6 +234,8 @@ export class BookQueryBuilder {
         return this.authorRuleToSql(operator, value as string[]);
       case 'authorGender':
         return this.authorGenderRuleToSql(operator, value as AuthorGender[]);
+      case 'storyArc':
+        return this.storyArcRuleToSql(operator, value as string[]);
       case 'genre':
         return this.genreRuleToSql(operator, value as string[]);
       case 'tag':
@@ -252,7 +279,7 @@ export class BookQueryBuilder {
       case 'lockStatus':
         return this.lockStatusRuleToSql(operator);
       case 'seriesStatus':
-        return this.seriesStatusRuleToSql(operator, userId);
+        return this.seriesStatusRuleToSql(operator, ctx);
       default:
         throw new BadRequestException(`Unknown filter field: ${String(field)}`);
     }
@@ -683,6 +710,28 @@ export class BookQueryBuilder {
     }
   }
 
+  private storyArcRuleToSql(operator: string, values: string[]): SQL {
+    const arcs = comicMetadata.storyArcs;
+    const hasArcs = (condition: SQL) => sql`exists (
+      select 1 from ${comicMetadata} where ${comicMetadata.bookId} = ${books.id} and ${condition}
+    )`;
+
+    switch (operator) {
+      case 'includesAny':
+        return hasArcs(arrayOverlaps(arcs, values));
+      case 'includesAll':
+        return hasArcs(arrayContains(arcs, values));
+      case 'excludesAll':
+        return not(hasArcs(arrayOverlaps(arcs, values)));
+      case 'isEmpty':
+        return not(hasArcs(sql`cardinality(${arcs}) > 0`));
+      case 'isNotEmpty':
+        return hasArcs(sql`cardinality(${arcs}) > 0`);
+      default:
+        throw new BadRequestException(`Invalid operator '${operator}' for storyArc field`);
+    }
+  }
+
   private genreRuleToSql(operator: string, values?: string[]): SQL {
     const existsGenre = (whereClause?: SQL) => {
       const predicates: SQL[] = [eq(bookGenres.bookId, books.id)];
@@ -964,14 +1013,44 @@ export class BookQueryBuilder {
     }
   }
 
-  private seriesStatusRuleToSql(operator: string, userId?: number): SQL {
-    if (userId === undefined) throw new BadRequestException('Series status filter requires an authenticated user');
+  private seriesStatusRuleToSql(operator: string, ctx: RuleContext): SQL {
     switch (operator) {
       case 'isUpNext':
-        return this.upNextInSeriesSql(userId);
+        if (ctx.userId === undefined) throw new BadRequestException('Series status filter requires an authenticated user');
+        return this.upNextInSeriesSql(ctx.userId);
+      case 'hasGaps':
+        return this.inSeriesWithGapsSql(ctx);
       default:
         throw new BadRequestException(`Invalid operator '${operator}' for seriesStatus field`);
     }
+  }
+
+  /**
+   * Books in a series the Series page lists under Gaps, decided by the same `seriesHasGapsSql`.
+   * A series is judged on every member the query is allowed to see (its libraries and content
+   * filters), not only the books the rest of the filter keeps: "by this author and has gaps" must
+   * still count a volume by a co-author, or it would name a gap the Series page does not. Books
+   * outside the user's libraries are left out for the same reason, and so they cannot fill a gap
+   * or reveal one.
+   */
+  private inSeriesWithGapsSql(ctx: RuleContext): SQL {
+    const scope: SQL[] = [inArray(books.libraryId, ctx.accessibleLibraryIds)];
+    if (ctx.implicitLibraryId !== undefined) scope.push(eq(books.libraryId, ctx.implicitLibraryId));
+    if (ctx.contentFilters) scope.push(...buildContentFilterClauses(ctx.contentFilters, this.db));
+
+    return sql`${books.id} in (
+      select ${bookSeriesMemberships.bookId} from ${bookSeriesMemberships}
+      where ${bookSeriesMemberships.seriesId} in (
+        select ${bookSeries.id}
+        from ${books}
+        inner join ${bookMetadata} on ${bookMetadata.bookId} = ${books.id}
+        inner join ${bookSeriesMemberships} on ${bookSeriesMemberships.bookId} = ${books.id}
+        inner join ${bookSeries} on ${bookSeries.id} = ${bookSeriesMemberships.seriesId}
+        where ${and(...scope)}
+        group by ${bookSeries.id}, ${bookSeries.expectedBookCount}
+        having ${seriesHasGapsSql()}
+      )
+    )`;
   }
 
   /**
@@ -1004,6 +1083,8 @@ export class BookQueryBuilder {
           b.library_id as library_id,
           m.series_id as series_id,
           m.series_index as series_index,
+          ${seriesUnitRank(sql.raw('m.series_unit'))} as unit_rank,
+          ${seriesVolumeSortKey(sql.raw('m.series_volume_index'))} as run_key,
           b.added_at as added_at,
           ${mergedProgress} as current_progress,
           ubs.status as read_status,
@@ -1022,22 +1103,24 @@ export class BookQueryBuilder {
           s.library_id,
           s.series_id,
           s.series_index,
+          s.unit_rank,
+          s.run_key,
           s.added_at,
           s.is_completed,
           s.current_progress,
           s.read_status,
           lag(s.is_completed) over (
-            partition by s.library_id, s.series_id
-            order by ${seriesIndexSortKey(sql.raw('s.series_index'))} asc,
+            partition by s.library_id, s.series_id, s.unit_rank
+            order by s.run_key asc, ${seriesIndexSortKey(sql.raw('s.series_index'))} asc,
               s.series_index collate "C" asc, s.added_at asc, s.id asc
           ) as previous_is_completed
         from scoped s
       )
-      select distinct on (o.library_id, o.series_id) o.id
+      select distinct on (o.library_id, o.series_id, o.unit_rank) o.id
       from ordered o
       where o.previous_is_completed = true and o.is_completed = false and o.current_progress = 0
         and (o.read_status is null or o.read_status in ('unread', 'want_to_read'))
-      order by o.library_id, o.series_id, ${seriesIndexSortKey(sql.raw('o.series_index'))} asc,
+      order by o.library_id, o.series_id, o.unit_rank, o.run_key asc, ${seriesIndexSortKey(sql.raw('o.series_index'))} asc,
         o.series_index collate "C" asc, o.added_at asc, o.id asc
     )`;
   }
@@ -1251,6 +1334,8 @@ export class BookQueryBuilder {
           parts.push(`sort_collection_position ${D} NULLS LAST`);
           break;
         case 'seriesIndex':
+          parts.push(`${seriesUnitRankSql('series_unit')} ${D}`);
+          parts.push(`${seriesVolumeSortKeySql('series_volume_index')} ${D}`);
           parts.push(`${seriesIndexSortKeySql('series_index')} ${D} NULLS LAST`);
           parts.push(`series_index COLLATE "C" ${D} NULLS LAST`);
           if (!sort.some((s) => s.field === 'series')) {

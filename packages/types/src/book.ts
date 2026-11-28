@@ -7,6 +7,7 @@ import type { CustomMetadataBookValue } from "./custom-metadata";
 import type { CoverAspectRatio } from "./library";
 import { DEFAULT_FORMAT_PRIORITY } from "./library";
 import type { SeriesIndex } from "./series-index";
+import type { SeriesUnit } from "./series-unit";
 import type { EpubMediaOverlayCapability } from "./epub";
 import { READ_ALONG_FORMAT_PRIORITY } from "./format-priority";
 
@@ -197,6 +198,13 @@ export type BookSeriesMembership = {
   seriesId: number;
   seriesName: string;
   seriesIndex: SeriesIndex | null;
+  /** Volume, chapter or issue; null when unclassified. Absent from servers without `series-units`. */
+  unit?: SeriesUnit | null;
+  /**
+   * The volume a chapter or issue belongs to, its run, read from its file or folder name. Absent from
+   * servers without `series-units`; editable on servers with `series-runs`.
+   */
+  volumeIndex?: SeriesIndex | null;
   displayOrder: number;
   /** Series-level, shared by every book in the series and by every user. */
   expectedBookCount: number | null;
@@ -213,6 +221,13 @@ export type BookCard = {
   seriesId?: number | null;
   seriesName: string | null;
   seriesIndex: SeriesIndex | null;
+  /**
+   * The unit of the position in `seriesIndex`: the primary series, or the series a series page lists.
+   * Absent from servers without `series-units`.
+   */
+  seriesUnit?: SeriesUnit | null;
+  /** The run of a chapter or issue in `seriesIndex`'s series. Absent from servers without `series-runs`. */
+  seriesVolumeIndex?: SeriesIndex | null;
   seriesMemberships?: BookSeriesMembership[];
   files: BookFileRef[];
   publishedDate: string | null;
