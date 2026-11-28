@@ -159,6 +159,74 @@ describe('Users admin lifecycle (e2e)', { timeout: 180_000 }, () => {
   });
 
   describe('admin route contracts', () => {
+    it('stores only granting permissions for the admin creation form and protects the generic settings route', async () => {
+      const url = '/api/v1/app-settings/starting-permissions';
+      const headers = authHeader(manageUsersAdmin.accessToken);
+      const original = await ctx.app.inject({ method: 'GET', url, headers });
+      expect(original.statusCode).toBe(200);
+      try {
+        const names = [PermissionEnum.EmailSend, PermissionEnum.LibraryMergeBooks];
+        const saved = await ctx.app.inject({ method: 'PUT', url, headers, payload: { permissionNames: names } });
+        expect(saved.statusCode).toBe(200);
+        expect(saved.json()).toEqual(expect.arrayContaining([...names, PermissionEnum.LibraryEditMetadata]));
+        const read = await ctx.app.inject({ method: 'GET', url, headers });
+        expect(read.json().sort()).toEqual(saved.json().sort());
+        for (const permissionNames of [['*'], [PermissionEnum.DemoRestricted]]) {
+          expect((await ctx.app.inject({ method: 'PUT', url, headers, payload: { permissionNames } })).statusCode).toBe(400);
+        }
+        expect(
+          (await ctx.app.inject({ method: 'PUT', url, headers: authHeader(regularA.accessToken), payload: { permissionNames: [] } })).statusCode,
+        ).toBe(403);
+        expect(
+          (
+            await ctx.app.inject({
+              method: 'PATCH',
+              url: '/api/v1/app-settings/admin_starting_permissions',
+              headers: authHeader(ctx.adminToken),
+              payload: { value: '[]' },
+            })
+          ).statusCode,
+        ).toBe(400);
+      } finally {
+        expect((await ctx.app.inject({ method: 'PUT', url, headers, payload: { permissionNames: original.json() } })).statusCode).toBe(200);
+      }
+    });
+
+    it('provisions Kindle recipients on local and shared accounts and safely retries an admin edit', async () => {
+      for (const url of ['/api/v1/users', '/api/v1/users/shared']) {
+        const username = 'kindle-' + randomUUID().slice(0, 8);
+        const headers = authHeader(ctx.adminToken);
+        const payload = { name: 'Kindle Reader', username, email: username + '@example.org', kindleEmail: 'reader@kindle.com', permissionNames: [] };
+        const create = await ctx.app.inject({ method: 'POST', url, headers, payload });
+        expect(create.statusCode).toBe(201);
+        const target = '/api/v1/users/' + create.json().id;
+        const adminHeaders = authHeader(manageUsersAdmin.accessToken);
+        const list = () => ctx.app.inject({ method: 'GET', url: target + '/kindle-recipients', headers: adminHeaders });
+        expect((await list()).json()).toEqual(['reader@kindle.com']);
+        for (const kindleEmail of ['second@kindle.com', 'SECOND@kindle.com']) {
+          expect((await ctx.app.inject({ method: 'PATCH', url: target, headers: adminHeaders, payload: { kindleEmail } })).statusCode).toBe(200);
+        }
+        expect((await list()).json()).toEqual(['second@kindle.com', 'reader@kindle.com']);
+        await ctx.db.insert(schema.emailRecipients).values({ userId: create.json().id, name: 'Office', email: 'office@example.org' });
+        const rejected = await ctx.app.inject({
+          method: 'PATCH',
+          url: target,
+          headers: adminHeaders,
+          payload: { name: 'Changed', kindleEmail: 'OFFICE@example.org' },
+        });
+        expect(rejected.statusCode).toBe(409);
+        expect((await ctx.app.inject({ method: 'GET', url: target, headers })).json().name).toBe('Kindle Reader');
+        expect((await ctx.app.inject({ method: 'PATCH', url: target, headers, payload: { kindleEmail: 'invalid' } })).statusCode).toBe(400);
+        expect(
+          (await ctx.app.inject({ method: 'GET', url: target + '/kindle-recipients', headers: authHeader(regularA.accessToken) })).statusCode,
+        ).toBe(403);
+      }
+      const target = '/api/v1/users/' + superuserTarget.userId;
+      const headers = authHeader(manageUsersAdmin.accessToken);
+      expect((await ctx.app.inject({ method: 'GET', url: target + '/kindle-recipients', headers })).statusCode).toBe(403);
+      expect((await ctx.app.inject({ method: 'PATCH', url: target, headers, payload: { kindleEmail: 'wrong@kindle.com' } })).statusCode).toBe(403);
+    });
+
     it('returns 404 user not found consistently across target-user admin routes', async () => {
       const missingUserId = 9_999_991;
       const cases: Array<{
@@ -773,6 +841,63 @@ describe('Users admin lifecycle (e2e)', { timeout: 180_000 }, () => {
   });
 
   describe('password reset and default-password behavior', () => {
+    it('applies changes only to newly issued invitations and keeps recovery links short', async () => {
+      const url = '/api/v1/app-settings/invitation-lifetime';
+      const headers = authHeader(manageUsersAdmin.accessToken);
+      const setLifetime = (minutes: number) => ctx.app.inject({ method: 'PUT', url, headers, payload: { minutes } });
+      const original = await ctx.app.inject({ method: 'GET', url, headers });
+      expect(original.json()).toEqual({ minutes: 15 });
+      expect((await ctx.app.inject({ method: 'PUT', url, headers: authHeader(regularA.accessToken), payload: { minutes: 1440 } })).statusCode).toBe(
+        403,
+      );
+      expect((await setLifetime(16)).statusCode).toBe(400);
+      try {
+        expect((await setLifetime(1440)).json()).toEqual({ minutes: 1440 });
+        expect(
+          (
+            await ctx.app.inject({
+              method: 'PATCH',
+              url: '/api/v1/app-settings/invitation_lifetime_minutes',
+              headers: authHeader(ctx.adminToken),
+              payload: { value: '999999' },
+            })
+          ).statusCode,
+        ).toBe(400);
+        const username = 'invite-' + randomUUID().slice(0, 8);
+        const create = await ctx.app.inject({
+          method: 'POST',
+          url: '/api/v1/users',
+          headers,
+          payload: { username, name: 'Invited reader', email: username + '@example.org' },
+        });
+        expect(create.statusCode).toBe(201);
+        const { id, resetLinkExpiresAt } = create.json();
+        const issue = () => ctx.app.inject({ method: 'POST', url: '/api/v1/users/' + id + '/reset-password', headers });
+        const rows = () => ctx.db.query.passwordResetTokens.findMany({ where: eq(schema.passwordResetTokens.userId, id) });
+        const expectLifetime = (expiresAt: string, minutes: number) => {
+          expect(Math.abs(Date.parse(expiresAt) - Date.now() - minutes * 60_000)).toBeLessThan(10_000);
+        };
+        expectLifetime(resetLinkExpiresAt, 1440);
+        expect((await setLifetime(10080)).statusCode).toBe(200);
+        expect((await rows())[0].expiresAt.toISOString()).toBe(resetLinkExpiresAt);
+        const reissue = await issue();
+        expect(reissue.statusCode).toBe(201);
+        expectLifetime(reissue.json().resetLinkExpiresAt, 10080);
+        expect((await rows()).filter((row) => !row.usedAt).map((row) => row.expiresAt.toISOString())).toEqual([reissue.json().resetLinkExpiresAt]);
+        const consume = () =>
+          ctx.app.inject({
+            method: 'POST',
+            url: '/api/v1/auth/reset-password',
+            payload: { token: parseTokenFromResetUrl(reissue.json().resetUrl), newPassword: 'InitialPass123' },
+          });
+        const results = await Promise.all([consume(), consume()]);
+        expect(results.map((result) => result.statusCode).sort()).toEqual([204, 400]);
+        expectLifetime((await issue()).json().resetLinkExpiresAt, 15);
+      } finally {
+        expect((await setLifetime(original.json().minutes)).statusCode).toBe(200);
+      }
+    });
+
     it('enforces admin reset lifecycle with consumable tokens and OIDC rejection', async () => {
       const username = `reset-local-${randomUUID().slice(0, 8)}`;
       const createUserResponse = await ctx.app.inject({

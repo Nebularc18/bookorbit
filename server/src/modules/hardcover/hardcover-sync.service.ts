@@ -125,6 +125,14 @@ query FindUserBookReadOwner($id: Int!) {
   }
 }`;
 
+type HardcoverUserBookFields = {
+  status_id: number;
+  privacy_setting_id: number;
+  edition_id?: number;
+  user_date?: string;
+  user_start_date?: string;
+};
+
 type InsertUserBookResult = { insert_user_book: { user_book: { id: number } | null; error: string | null } };
 type UpdateUserBookResult = { update_user_book: { user_book: { id: number } | null; error: string | null } };
 type FindUserBookResult = { me: { user_books: { id: number }[] } };
@@ -573,15 +581,26 @@ export class HardcoverSyncService {
       const hasSessionProgress = sessions.length > 0 && book.progress != null;
       // Marking a book read can fill its remote progress before the dated updates arrive.
       const deferCompletion = hasSessionProgress && hardcoverStatusId === HARDCOVER_STATUS.READ;
+      const userBookFields: HardcoverUserBookFields = {
+        status_id: hardcoverStatusId,
+        privacy_setting_id: settings.privacySettingId,
+        ...(match.hardcoverEditionId != null && { edition_id: match.hardcoverEditionId }),
+        ...(hardcoverStatusId === HARDCOVER_STATUS.READ && endDate
+          ? { user_date: endDate, ...(startDate ? { user_start_date: startDate } : {}) }
+          : {}),
+      };
+      const ratedUserBookFields = { ...userBookFields, ...(hardcoverRating != null && { rating: hardcoverRating }) };
       const cachedUserBookId = match.replacedHardcoverBookId != null ? null : (activeInitialState?.hardcoverUserBookId ?? null);
       const userBookId =
         cachedUserBookId ??
-        (await this.insertOrFindUserBook(userId, token, {
-          bookId: match.hardcoverBookId,
-          statusId: deferCompletion ? HARDCOVER_STATUS.WANT_TO_READ : hardcoverStatusId,
-          privacySettingId: settings.privacySettingId,
-          editionId: match.hardcoverEditionId ?? undefined,
-        }));
+        (await this.insertOrFindUserBook(
+          userId,
+          token,
+          match.hardcoverBookId,
+          deferCompletion
+            ? { status_id: HARDCOVER_STATUS.WANT_TO_READ, privacy_setting_id: settings.privacySettingId, edition_id: userBookFields.edition_id }
+            : userBookFields,
+        ));
 
       const userBookFieldsChanged =
         cachedUserBookId == null ||
@@ -592,12 +611,7 @@ export class HardcoverSyncService {
         (match.hardcoverEditionId ?? null) !== (activeInitialState.hardcoverEditionId ?? null);
 
       if (!deferCompletion && userBookFieldsChanged) {
-        await this.updateUserBookFields(userId, token, userBookId, {
-          statusId: hardcoverStatusId,
-          privacySettingId: settings.privacySettingId,
-          rating: hardcoverRating,
-          editionId: match.hardcoverEditionId ?? undefined,
-        });
+        await this.updateUserBookFields(userId, token, userBookId, ratedUserBookFields);
       }
 
       const state = await this.repo.findBookState(userId, book.bookId);
@@ -669,12 +683,7 @@ export class HardcoverSyncService {
         if (hardcoverReadId != null && endDate) {
           await this.updateUserBookRead(userId, token, hardcoverReadId, { finished_at: endDate });
         }
-        await this.updateUserBookFields(userId, token, userBookId, {
-          statusId: hardcoverStatusId,
-          privacySettingId: settings.privacySettingId,
-          rating: hardcoverRating,
-          editionId: match.hardcoverEditionId ?? undefined,
-        });
+        await this.updateUserBookFields(userId, token, userBookId, ratedUserBookFields);
       }
 
       for (const attempt of historyAttempts) {
@@ -804,29 +813,20 @@ export class HardcoverSyncService {
     }
   }
 
-  private async insertOrFindUserBook(
-    userId: number,
-    token: string,
-    input: { bookId: number; statusId: number; privacySettingId: number; editionId?: number },
-  ): Promise<number> {
+  private async insertOrFindUserBook(userId: number, token: string, bookId: number, fields: HardcoverUserBookFields): Promise<number> {
     const insertResult = await this.client.query<InsertUserBookResult>(userId, token, INSERT_USER_BOOK_MUTATION, {
-      object: {
-        book_id: input.bookId,
-        status_id: input.statusId,
-        privacy_setting_id: input.privacySettingId,
-        ...(input.editionId != null && { edition_id: input.editionId }),
-      },
+      object: { book_id: bookId, ...fields },
     });
 
     const userBookId = insertResult.insert_user_book?.user_book?.id;
     if (userBookId) return userBookId;
 
     const findResult = await this.client.query<FindUserBookResult>(userId, token, FIND_USER_BOOK_QUERY, {
-      bookId: input.bookId,
+      bookId,
     });
 
     const existingId = findResult.me?.user_books?.[0]?.id;
-    if (!existingId) throw new Error(`Book ${input.bookId} not found in Hardcover library after insert`);
+    if (!existingId) throw new Error(`Book ${bookId} not found in Hardcover library after insert`);
 
     return existingId;
   }
@@ -835,16 +835,11 @@ export class HardcoverSyncService {
     userId: number,
     token: string,
     userBookId: number,
-    fields: { statusId: number; privacySettingId: number; rating: number | null; editionId?: number },
+    fields: HardcoverUserBookFields & { rating?: number },
   ): Promise<void> {
     const result = await this.client.query<UpdateUserBookResult>(userId, token, UPDATE_USER_BOOK_MUTATION, {
       id: userBookId,
-      object: {
-        status_id: fields.statusId,
-        privacy_setting_id: fields.privacySettingId,
-        ...(fields.rating != null && { rating: fields.rating }),
-        ...(fields.editionId != null && { edition_id: fields.editionId }),
-      },
+      object: fields,
     });
 
     if (result.update_user_book?.error) {

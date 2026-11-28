@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm';
 import { check, index, integer, pgTable, primaryKey, serial, timestamp, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
+import type { SeriesUnit } from '@bookorbit/types';
+
 import { books } from './books';
 
 export const bookSeries = pgTable(
@@ -45,6 +47,10 @@ export const bookSeriesMemberships = pgTable(
       .notNull()
       .references(() => bookSeries.id, { onDelete: 'cascade' }),
     seriesIndex: varchar('series_index', { length: 20 }),
+    /** Volume, chapter or issue; null is unclassified and behaves as a volume. */
+    seriesUnit: varchar('series_unit', { length: 10 }).$type<SeriesUnit>(),
+    /** The volume a chapter or issue belongs to, read from its file name (`v03 c012` gives 3). */
+    seriesVolumeIndex: varchar('series_volume_index', { length: 20 }),
     displayOrder: integer('display_order').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
@@ -55,8 +61,10 @@ export const bookSeriesMemberships = pgTable(
   (t) => [
     primaryKey({ columns: [t.bookId, t.seriesId] }),
     uniqueIndex('book_series_memberships_book_display_uidx').on(t.bookId, t.displayOrder),
-    index('book_series_memberships_series_index_book_idx').on(
+    index('book_series_memberships_series_order_book_idx').on(
       t.seriesId,
+      sql`(CASE WHEN ${t.seriesUnit} IN ('chapter', 'issue') THEN 1 ELSE 0 END)`,
+      sql`(ARRAY[split_part(${t.seriesVolumeIndex}, '.', 1)::numeric, CASE WHEN ${t.seriesVolumeIndex} IS NULL THEN NULL WHEN strpos(${t.seriesVolumeIndex}, '.') = 0 THEN -1::numeric ELSE split_part(${t.seriesVolumeIndex}, '.', 2)::numeric END])`,
       sql`(CASE WHEN ${t.seriesIndex} IS NULL THEN NULL ELSE ARRAY[split_part(${t.seriesIndex}, '.', 1)::numeric, CASE WHEN strpos(${t.seriesIndex}, '.') = 0 THEN -1::numeric ELSE split_part(${t.seriesIndex}, '.', 2)::numeric END] END)`,
       sql`${t.seriesIndex} COLLATE "C"`,
       t.bookId,
@@ -64,6 +72,11 @@ export const bookSeriesMemberships = pgTable(
     index('book_series_memberships_book_display_idx').on(t.bookId, t.displayOrder),
     check('book_series_memberships_display_order_nonnegative_chk', sql`${t.displayOrder} >= 0`),
     check('book_series_memberships_series_index_format_chk', sql`${t.seriesIndex} is null or ${t.seriesIndex} ~ '^[0-9]+([.][0-9]+)?$'`),
+    check('book_series_memberships_series_unit_chk', sql`${t.seriesUnit} is null or ${t.seriesUnit} in ('volume', 'chapter', 'issue')`),
+    check(
+      'book_series_memberships_series_volume_index_format_chk',
+      sql`${t.seriesVolumeIndex} is null or ${t.seriesVolumeIndex} ~ '^[0-9]+([.][0-9]+)?$'`,
+    ),
   ],
 );
 

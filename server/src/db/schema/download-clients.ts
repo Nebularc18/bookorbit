@@ -3,6 +3,7 @@ import { bigint, boolean, check, index, integer, jsonb, pgTable, serial, text, t
 
 import type { DownloadClientType, IndexerColor, ReleaseUnitChoice } from '@bookorbit/types';
 
+import { users } from './auth';
 import { bookDockFiles } from './book-dock';
 import { bookRequests } from './book-requests';
 import { requestIndexers } from './request-indexers';
@@ -31,6 +32,10 @@ export const downloadClients = pgTable(
 
     /** Tags our torrents in the client so BookOrbit only ever touches its own. */
     category: varchar('category', { length: 100 }).notNull().default('bookorbit'),
+    /** Files audiobook grabs under their own category. Null keeps them under `category`. */
+    audiobookCategory: varchar('audiobook_category', { length: 100 }),
+    /** Files releases in a comic archive format under their own category. Null keeps them under `category`. */
+    comicCategory: varchar('comic_category', { length: 100 }),
     useHardlinks: boolean('use_hardlinks').notNull().default(true),
     /** Drop a finished Usenet job and its folder once the Book Dock holds the import. */
     removeCompletedDownloads: boolean('remove_completed_downloads').notNull().default(false),
@@ -104,6 +109,11 @@ export const bookRequestDownloads = pgTable(
     remoteDownload: jsonb('remote_download').$type<{ source: string; sourceId: string }>(),
     /** Grabbed by the automation rather than by a person, which is what makes it retryable. */
     automated: boolean('automated').notNull().default(false),
+    /**
+     * Who sent the files of an `upload` attempt, and the only account whose upload sessions may
+     * deliver them. Null for every other source, and once that account is deleted.
+     */
+    uploadedByUserId: integer('uploaded_by_user_id').references(() => users.id, { onDelete: 'set null' }),
     releaseTitle: varchar('release_title', { length: 500 }).notNull(),
     releaseGuid: text('release_guid'),
     releaseSizeBytes: bigint('release_size_bytes', { mode: 'number' }),
@@ -185,7 +195,7 @@ export const bookRequestDownloads = pgTable(
       .on(sql`coalesce(${t.downloadClientId}, 0)`, t.clientKey)
 
       .where(sql`${t.status} in ('queued', 'downloading', 'completed', 'importing', 'needs_review')`),
-    check('book_request_downloads_source_chk', sql`${t.source} in ('magnet', 'torrent_file', 'direct_url', 'nzb_file', 'shelfmark')`),
+    check('book_request_downloads_source_chk', sql`${t.source} in ('magnet', 'torrent_file', 'direct_url', 'nzb_file', 'shelfmark', 'upload')`),
     check(
       'book_request_downloads_status_chk',
       sql`${t.status} in ('queued', 'downloading', 'completed', 'importing', 'needs_review', 'imported', 'failed')`,
@@ -194,8 +204,42 @@ export const bookRequestDownloads = pgTable(
   ],
 );
 
+/**
+ * The files an `upload` attempt expects, declared before any of them is sent. The attempt is
+ * imported once every row is `received`, which is what lets each file travel as its own upload
+ * session, in any order and from any device, with no closing call to forget.
+ */
+export const bookRequestUploadFiles = pgTable(
+  'book_request_upload_files',
+  {
+    id: serial('id').primaryKey(),
+    downloadId: integer('download_id')
+      .notNull()
+      .references(() => bookRequestDownloads.id, { onDelete: 'cascade' }),
+    /** Relative to the attempt's staging directory, `/` separated, each segment already sanitized. */
+    path: varchar('path', { length: 1024 }).notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    receivedBytes: bigint('received_bytes', { mode: 'number' }).notNull().default(0),
+    status: varchar('status', { length: 20 }).notNull().default('pending'),
+    receivedAt: timestamp('received_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdateFn(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex('book_request_upload_files_download_path_uidx').on(t.downloadId, t.path),
+    check('book_request_upload_files_status_chk', sql`${t.status} in ('pending', 'received')`),
+    check('book_request_upload_files_size_positive_chk', sql`${t.sizeBytes} > 0`),
+    check('book_request_upload_files_received_range_chk', sql`${t.receivedBytes} >= 0 and ${t.receivedBytes} <= ${t.sizeBytes}`),
+  ],
+);
+
 export type DownloadClientRow = typeof downloadClients.$inferSelect;
 export type NewDownloadClientRow = typeof downloadClients.$inferInsert;
 export type DownloadClientPathMappingRow = typeof downloadClientPathMappings.$inferSelect;
 export type BookRequestDownloadRow = typeof bookRequestDownloads.$inferSelect;
 export type NewBookRequestDownloadRow = typeof bookRequestDownloads.$inferInsert;
+export type BookRequestUploadFileRow = typeof bookRequestUploadFiles.$inferSelect;
+export type NewBookRequestUploadFileRow = typeof bookRequestUploadFiles.$inferInsert;

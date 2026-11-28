@@ -71,7 +71,7 @@ export class ReadingAttemptService {
     options: ManualStatusOptions = {},
   ): Promise<UserBookStatus> {
     let changed = false;
-    const result = await this.repo.transaction<UserBookStatus>(async (tx) => {
+    const result = await this.repo.bookTransaction<UserBookStatus>(userId, bookId, async (tx) => {
       let active: Awaited<ReturnType<ReadingAttemptRepository['findActive']>> | null = await this.repo.findActive(tx, userId, bookId);
       let latest = active ?? (await this.repo.findLatest(tx, userId, bookId));
       const hasStartedOn = startedOn !== undefined;
@@ -273,6 +273,7 @@ export class ReadingAttemptService {
     occurredOn: string;
     origin: Exclude<ReadingAttemptOrigin, 'manual' | 'hardcover' | 'migration'>;
     progress: number;
+    readingThreshold: number;
     finishThreshold: number;
     strongRereadEvidence: boolean;
     meaningfulActivity: boolean;
@@ -280,7 +281,7 @@ export class ReadingAttemptService {
     timeZone?: string;
   }): Promise<UserBookStatus | null> {
     let changed = false;
-    const result = await this.repo.transaction<UserBookStatus | null>(async (tx) => {
+    const result = await this.repo.bookTransaction<UserBookStatus | null>(input.userId, input.bookId, async (tx) => {
       let active: Awaited<ReturnType<ReadingAttemptRepository['findActive']>> | null = await this.repo.findActive(tx, input.userId, input.bookId);
       let latest = active ?? (await this.repo.findLatest(tx, input.userId, input.bookId));
       const hasCompleted = await this.repo.hasCompleted(tx, input.userId, input.bookId);
@@ -332,7 +333,8 @@ export class ReadingAttemptService {
         });
         changed = true;
       }
-      if (!active && !isFinished && (input.progress > 0 || input.strongRereadEvidence || input.meaningfulActivity)) {
+      if (!active && !isFinished) {
+        if (!hasCompleted && !hasReachedProgressThreshold(input.progress, input.readingThreshold)) return null;
         active = await this.repo.createActive(tx, {
           userId: input.userId,
           bookId: input.bookId,

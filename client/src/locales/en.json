@@ -202,6 +202,20 @@
           "value": "{value}%",
           "off": "Off"
         },
+        "glowTexture": {
+          "label": "Glow texture",
+          "hint": "The drawing under the top glow. It fades out with the glow, so a longer reach shows more of it.",
+          "options": {
+            "warp": "Warp",
+            "starfield": "Starfield",
+            "constellations": "Constellations",
+            "star-trails": "Star trails",
+            "milky-way": "Milky Way",
+            "galaxy": "Galaxy",
+            "squares": "Squares",
+            "none": "None"
+          }
+        },
         "accents": {
           "grey": "Grey",
           "scarlet": "Scarlet",
@@ -560,14 +574,6 @@
       },
       "behavior": {
         "title": "Library Behavior",
-        "thumbnailClicks": {
-          "label": "Thumbnail clicks",
-          "hint": "Choose what happens when opening a book from grid and list views",
-          "readFirst": "Read first",
-          "readFirstHint": "Open the reader when a readable file exists",
-          "openDetails": "Open details",
-          "openDetailsHint": "Go to the book details page from grid and list thumbnails"
-        },
         "highlightPeek": {
           "label": "Open highlights in Peek mode",
           "hint": "Jumping to a highlight leaves your reading progress and read status unchanged"
@@ -1693,6 +1699,9 @@
           "summaryUnsaved": "{count, plural, one {# voice configured} other {# voices configured}} - Unsaved changes",
           "importFromProvider": "Import from provider",
           "loadPreset": "Load {preset} preset",
+          "addVoice": "Add voice",
+          "duplicateVoiceId": "A voice with this ID already exists.",
+          "discardChanges": "Discard unsaved voice changes?",
           "importUnsupported": "This provider does not support voice discovery.",
           "importUnsupportedWithPreset": "This provider does not support voice discovery. Use the “Load {preset} preset” button instead.",
           "discoveryUnsupported": "This provider does not expose a voice list endpoint.",
@@ -4593,6 +4602,11 @@
           "apiKeyWillClear": "The stored API key is removed when you save",
           "category": "Category",
           "categoryHint": "Tags the downloads BookOrbit adds, so it only ever acts on its own.",
+          "audiobookCategory": "Audiobook category",
+          "audiobookCategoryHint": "Audiobook downloads go here. Leave empty to use the category above.",
+          "comicCategory": "Comic category",
+          "comicCategoryHint": "CBZ, CBR and CB7 releases go here. Leave empty to use the category above.",
+          "categoryOverridesNote": "Use categories only BookOrbit files into. Each one's download folder needs a path mapping below.",
           "priority": "Priority",
           "enabled": "Enabled",
           "useHardlinks": "Use hardlinks",
@@ -5072,6 +5086,8 @@
           "failedAt": "failed {time}"
         },
         "categoryLabel": "category {category}",
+        "audiobookCategoryLabel": "audiobooks in {category}",
+        "comicCategoryLabel": "comics in {category}",
         "priorityLabel": "priority {priority}",
         "editClientName": "Edit {name}",
         "sections": {
@@ -5574,12 +5590,55 @@
     "resetLink": {
       "title": "Password Reset Link",
       "description": "Share this link with the user. It expires in 15 minutes.",
+      "descriptionWithExpiry": "Share this link with the user. It expires on {expiry}.",
       "copy": "Copy",
       "copied": "Copied!",
       "copyFailed": "Copy failed",
       "notShownAgain": "This link will not be shown again."
     },
     "userForm": {
+      "permissionLabels": {
+        "library_download": "Download books",
+        "library_upload": "Upload books",
+        "library_edit_metadata": "Edit metadata",
+        "library_delete_books": "Delete books",
+        "library_merge_books": "Merge books",
+        "library_generate_read_aloud": "Generate read-aloud books",
+        "library_generate_story_guide": "Build story guides",
+        "book_dock_access": "Library Dock",
+        "book_request_access": "Request books",
+        "demo_restricted": "Demo restricted",
+        "kobo_sync": "Kobo sync",
+        "koreader_sync": "KOReader sync",
+        "hardcover_sync": "Hardcover sync",
+        "readwise_sync": "Readwise sync",
+        "storygraph_sync": "StoryGraph sync",
+        "opds_access": "OPDS access",
+        "api_keys": "Create API keys",
+        "email_send": "Send by email",
+        "manage_email": "Manage email",
+        "manage_libraries": "Manage libraries",
+        "manage_metadata_config": "Metadata config",
+        "manage_icons": "Manage icons",
+        "manage_app_settings": "App settings",
+        "manage_book_dock": "Manage Library Dock",
+        "manage_book_requests": "Manage book requests",
+        "book_request_auto_approve": "Auto-approve requests",
+        "book_request_self_fulfill": "Download books directly",
+        "manage_users": "Manage users",
+        "view_audit_log": "View audit log",
+        "notification_access": "Notifications"
+      },
+      "kindle": {
+        "title": "Send to Kindle",
+        "hint": "Add a delivery address for this reader’s Kindle.",
+        "address": "Kindle email address",
+        "add": "Add Kindle recipient",
+        "discard": "Discard address",
+        "recent": "Recently added Kindle addresses",
+        "loadError": "The saved Kindle addresses could not be loaded.",
+        "permissionHint": "Enable Send by email in Permissions so this reader can send books."
+      },
       "editUser": "Edit User",
       "createUser": "Create User",
       "createSharedAccount": "Create Shared Account",
@@ -5665,6 +5724,9 @@
       "searchGenresPlaceholder": "Search genres...",
       "saving": "Saving...",
       "errors": {
+        "kindleConflict": "This address already belongs to a different type of recipient on this account.",
+        "invalidKindleEmail": "Enter a valid Kindle email address.",
+        "saveFailed": "The account could not be saved. Try again.",
         "updateUser": "Failed to update user",
         "updatePermissions": "Failed to update permissions",
         "updateLibraryAccess": "Failed to update library access",
@@ -5676,6 +5738,7 @@
         "usernameRequired": "Username is required"
       },
       "drawerDescription": "Edit this account's profile, library access, permissions and restrictions.",
+      "startingPermissionsHint": "Starting permissions are preselected. Adjust them in Permissions before saving.",
       "createHint": "New accounts hold no permissions until you grant them.",
       "sectionsLabel": "Account settings",
       "sections": {
@@ -5787,6 +5850,13 @@
         "loadError": "Failed to load the self-registration setting",
         "saveError": "Failed to update the self-registration setting"
       },
+      "invitationLifetime": {
+        "label": "Invitation link lifetime",
+        "hint": "Applies when a new account receives its first password link or an administrator reissues the invitation.",
+        "loadError": "The invitation link lifetime could not be loaded.",
+        "saveError": "The invitation link lifetime could not be saved.",
+        "saved": "Invitation link lifetime saved."
+      },
       "defaultLibraryAccess": {
         "title": "Default Library Access",
         "subtitle": "Viewer access granted to self-registered and OIDC-provisioned users.",
@@ -5871,6 +5941,13 @@
       "defaults": {
         "title": "Defaults for new accounts",
         "appliesTo": "Applies to self-registration and OIDC",
+        "permissions": "Starting permissions",
+        "permissionsHint": "Preselected when an admin creates an account. Adjust them for each reader before saving.",
+        "editPermissions": "Edit permissions",
+        "savePermissions": "Save defaults",
+        "permissionsLoadError": "Starting permissions could not be loaded.",
+        "permissionsSaveError": "Starting permissions could not be saved.",
+        "more": "+{count} more",
         "startingLibraries": "Starting libraries",
         "startingLibrariesHint": "Viewer access granted automatically to every new account."
       }
@@ -5937,7 +6014,8 @@
         "webReader": "Web reader",
         "koreader": "KOReader",
         "pdf": "PDF",
-        "kobo": "Kobo"
+        "kobo": "Kobo",
+        "page": "Page"
       },
       "status": {
         "exact": "Exact",
@@ -6090,7 +6168,8 @@
       "cyan": "Cyan",
       "purple": "Purple",
       "gray": "Gray"
-    }
+    },
+    "pageNote": "Note on page {page}"
   },
   "apiKeys": {
     "errors": {
@@ -7125,7 +7204,13 @@
     },
     "card": {
       "missing": "Missing",
-      "moreActions": "More actions for {title}"
+      "moreActions": "More actions for {title}",
+      "dock": {
+        "continue": "Continue",
+        "resume": "Resume",
+        "readAgain": "Read again",
+        "listenAgain": "Listen again"
+      }
     },
     "file": {
       "primary": "Primary",
@@ -7213,7 +7298,7 @@
       "reading": "Reading",
       "onHold": "On Hold",
       "rereading": "Rereading",
-      "read": "Read",
+      "read": "Finished",
       "skimmed": "Skimmed",
       "abandoned": "Abandoned"
     },
@@ -7344,6 +7429,7 @@
         "pageCount": "Page Count",
         "author": "Author",
         "authorGender": "Author Gender",
+        "storyArc": "Story Arc",
         "genre": "Genre",
         "tag": "Tag",
         "collection": "Collection",
@@ -7397,6 +7483,7 @@
         "isLocked": "is locked",
         "isUnlocked": "is unlocked",
         "isUpNext": "is up next",
+        "hasGaps": "has gaps",
         "isTrue": "is yes",
         "isFalse": "is no"
       },
@@ -7475,6 +7562,7 @@
       "valueSearch": {
         "author": "Search authors",
         "series": "Search series",
+        "storyArc": "Search story arcs",
         "genre": "Search genres",
         "tag": "Search tags",
         "publisher": "Search publishers",
@@ -8025,7 +8113,8 @@
         "onDisk": "On disk",
         "detailsHeading": "Details",
         "percentUnderOne": "<1%",
-        "percentOverNinetyNine": ">99%"
+        "percentOverNinetyNine": ">99%",
+        "heroProgress": "{percent} read"
       },
       "editMetadata": {
         "fieldCount": "{count, plural, =0 {no fields} one {one field} other {# fields}}",
@@ -9752,7 +9841,18 @@
         "invalidSeriesIndex": "Enter digits with at most one decimal point, such as 5.10.",
         "totalLabel": "Books in series",
         "totalPlaceholder": "of",
-        "totalHint": "Total books in this series. Shared with everyone who has this series."
+        "totalHint": "Total books in this series. Shared with everyone who has this series.",
+        "kindLabel": "Kind",
+        "kindButtonLabel": "Kind: {kind}",
+        "kindNone": "None",
+        "kindVolume": "Volume",
+        "kindChapter": "Chapter",
+        "kindIssue": "Issue",
+        "kindNoneHint": "None sorts with volumes.",
+        "volumeIndexLabel": "Volume this belongs to",
+        "volumeIndexPlaceholder": "Vol.",
+        "volumeIndexHint": "The volume this chapter or issue belongs to. Issue numbers that restart in each volume sort volume by volume.",
+        "invalidVolumeIndex": "Enter the volume number as digits, such as 2."
       },
       "storyGuide": {
         "title": "Story guide",
@@ -10695,6 +10795,7 @@
       "seriesIndex": "Series #",
       "genres": "Genres",
       "genresCommaSeparated": "Genres (comma-separated)",
+      "tags": "Tags",
       "description": "Description"
     },
     "upload": {
@@ -11313,7 +11414,8 @@
       "bulkUnhidden": "{count, plural, one {# request back on your list} other {# requests back on your list}}",
       "bulkLeft": "{count, plural, one {Left # request} other {Left # requests}}",
       "bulkCancelled": "{count, plural, one {# request cancelled} other {# requests cancelled}}",
-      "bulkDeleted": "{count, plural, one {# request deleted} other {# requests deleted}}"
+      "bulkDeleted": "{count, plural, one {# request deleted} other {# requests deleted}}",
+      "uploadCancelled": "Upload cancelled"
     },
     "errors": {
       "loadFailed": "Could not load requests",
@@ -11340,7 +11442,8 @@
       "bulkLeaveFailed": "Could not leave the selected requests",
       "bulkCancelFailed": "Could not cancel the selected requests",
       "bulkDeleteFailed": "Could not delete the selected requests",
-      "selectAllFailed": "Could not select every matching request"
+      "selectAllFailed": "Could not select every matching request",
+      "cancelUploadFailed": "Could not cancel that upload"
     },
     "grab": {
       "title": "Send to a download client",
@@ -11793,7 +11896,10 @@
       "leaveManyDescription": "You stop following them and stop being notified about them. Whoever asked for them keeps their request.",
       "leaveConfirm": "{count, plural, one {Leave request} other {Leave # requests}}",
       "stay": "{count, plural, one {Stay on it} other {Stay on them}}",
-      "goBack": "Go back"
+      "goBack": "Go back",
+      "cancelUploadTitle": "Cancel this upload?",
+      "cancelUploadDescription": "The files sent so far are deleted, and the request stays open for another release or another upload.",
+      "discardUploadDescription": "The uploaded files are removed from the Library Dock and the request is marked failed."
     },
     "outcome": {
       "filedIn": "Filed in {library} {time}",
@@ -12172,6 +12278,132 @@
         "failed": "{step}: failed here",
         "upcoming": "{step}: not yet"
       }
+    },
+    "upload": {
+      "action": "Upload files",
+      "send": "{count, plural, one {Upload # file} other {Upload # files}}",
+      "clear": "Clear",
+      "cancel": "Cancel upload",
+      "retry": "{count, plural, one {Retry # file} other {Retry # files}}",
+      "addMissing": "Add missing files",
+      "section": "Your files",
+      "fileCount": "{count, plural, one {# file} other {# files}}",
+      "addMore": "Add more",
+      "planning": "Reading the files...",
+      "doneCount": "{done} of {total} done",
+      "arrivedCount": "{arrived} of {total} arrived",
+      "drop": {
+        "title": "Drop to upload to this request",
+        "body": "Book files, a whole audiobook folder, or an archive. Checked against the request before it is filed."
+      },
+      "plan": {
+        "ebook": "One e-book",
+        "ebookFormats": "One e-book in {count} formats",
+        "audiobook": "{count, plural, one {One audiobook · # track} other {One audiobook · # tracks}}",
+        "comic": "One comic",
+        "archive": "An archive",
+        "choose": "{count} different books",
+        "severalArchives": "{count} separate archives",
+        "noBook": "No book files",
+        "sub": "{formats} · {size}",
+        "subWithArt": "{formats} with cover art · {size}",
+        "subChoose": "Pick the one this request is for",
+        "subNoBook": "Nothing picked can become a book",
+        "subArchives": "One archive at a time",
+        "unitsLabel": "Which book this request is for",
+        "filesLabel": "Picked files",
+        "chip": {
+          "matches": "Matches the request",
+          "later": "Checked after upload",
+          "pickOne": "Pick one",
+          "notEbook": "Not an e-book",
+          "notAudiobook": "Not an audiobook",
+          "noBook": "No book",
+          "oneArchive": "One archive",
+          "tooLarge": "Too large",
+          "matchesTitle": "Matches the title",
+          "notComic": "Not a comic"
+        },
+        "destination": "Files into {library}",
+        "joins": {
+          "audiobook": "Joins {title} as its audiobook",
+          "ebook": "Joins {title} as its e-book"
+        },
+        "blocked": {
+          "wrongEbook": "This request is for the e-book. Audiobook files can close an audiobook request.",
+          "wrongAudiobook": "This request is for the audiobook. E-book files can close an e-book request.",
+          "noBook": "Pick the book's own files, such as an EPUB, a PDF or an audiobook's tracks.",
+          "severalArchives": "Upload one archive, or the files inside it.",
+          "tooLarge": "{name} is {size}, over this server's {limit} upload limit.",
+          "tooMany": "That is more than {max} files. Pick the book's own folder instead.",
+          "refused": "The server would not read these files.",
+          "network": "Could not reach the server to read these files.",
+          "wrongComic": "This request is for the comic. Comic files, such as a CBZ or CBR, can close it."
+        }
+      },
+      "moreTracks": "{count, plural, one {# more track} other {# more tracks}}",
+      "moreFiles": "{count, plural, one {# more file} other {# more files}}",
+      "moreWaiting": "{count, plural, one {# more waiting} other {# more waiting}}",
+      "othersArrived": "{count, plural, one {# other file arrived} other {# other files arrived}}",
+      "skipped": "Skipped: {reason}",
+      "skip": {
+        "hidden": "Hidden file",
+        "sample": "Sample",
+        "padding": "Padding",
+        "unsupported": "Not a book file",
+        "junk_folder": "Extra folder",
+        "other_book": "Another book",
+        "empty": "Empty file"
+      },
+      "fileDone": "Done",
+      "notSent": "Not sent yet",
+      "retryFile": "Retry {name}",
+      "hold": {
+        "title": "Let me check the match before it is filed",
+        "hint": "Without this, a good match is filed straight away. A poor one waits for a check either way."
+      },
+      "fileErrors": {
+        "connection": "Connection lost at {sent} of {total}",
+        "notABook": "The file is not what its name says",
+        "tooLarge": "Larger than this server accepts",
+        "storageFull": "The server is out of space",
+        "notExpected": "The request no longer expects this file",
+        "expired": "The upload took too long and expired",
+        "other": "Could not send this file"
+      },
+      "startFailed": "Could not start the upload",
+      "noneMatched": "None of those files are ones this upload is waiting for",
+      "progressLabel": "Upload progress for {title}",
+      "card": {
+        "uploading": "{total, plural, one {Uploading the file} other {Uploading {done} of # files}}",
+        "uploadingHere": "{sent} of {size}. Keep this tab open until the upload finishes.",
+        "uploadingElsewhere": "{sent} of {size}, sent by {name}.",
+        "uploadingSoFar": "{sent} of {size} so far.",
+        "paused": "{count, plural, one {Upload paused: # file did not arrive} other {Upload paused: # files did not arrive}}",
+        "pausedSentence": "{total, plural, one {The file is not on the server yet. Nothing is filed until it arrives.} other {{arrived} of # files are on the server. Nothing is filed until all of them arrive.}}",
+        "checking": "Checking the match",
+        "checkingSentence": "{total, plural, one {The file arrived. It is compared with the request before it is filed.} other {All # files arrived. They are compared with the request before they are filed.}}",
+        "filedIn": "Filed in {library}",
+        "joinedTold": {
+          "audiobook": "Joined {title} as its audiobook. {requester} was told it is ready.",
+          "ebook": "Joined {title} as its e-book. {requester} was told it is ready."
+        },
+        "joined": {
+          "audiobook": "Joined {title} as its audiobook.",
+          "ebook": "Joined {title} as its e-book."
+        },
+        "told": "{requester} was told it is ready.",
+        "cancelled": "Upload cancelled",
+        "cancelledSentence": "The files sent were deleted. Upload them again, or pick a release."
+      },
+      "steps": {
+        "filesChosen": "Files chosen",
+        "uploading": "Uploading",
+        "uploaded": "Uploaded"
+      },
+      "uploadedBy": "Uploaded by {name}",
+      "uploaded": "Uploaded",
+      "attemptStopped": "Upload stopped"
     }
   },
   "collection": {
@@ -12251,6 +12483,7 @@
       "style": "Style",
       "surfacePalette": "Surface",
       "topGlow": "Top glow",
+      "glowTexture": "Glow texture",
       "theme": "Theme",
       "accent": "Accent",
       "radius": "Radius",
@@ -13930,6 +14163,8 @@
             "authors": "Authors",
             "series": "Series",
             "seriesIndex": "Series number",
+            "seriesUnit": "Series kind",
+            "seriesVolumeIndex": "Volume number",
             "publishedYear": "Published year",
             "publishedDate": "Published date"
           },
@@ -14042,14 +14277,14 @@
         },
         "markAsFinished": {
           "title": "Mark as finished",
-          "hint": "A book is automatically marked as \"read\" when this percentage of progress is reached.",
+          "hint": "A book is automatically marked as finished when this percentage of progress is reached.",
           "invalidThreshold": "Finished progress must be between 90% and 100%."
         },
         "statusTitle": "Reading status",
         "zones": {
           "notStarted": "Not started",
           "reading": "Reading",
-          "read": "Read"
+          "read": "Finished"
         },
         "range": "Between {min} and {max}.",
         "startSlider": "Drag to set when a book counts as started",
@@ -14535,7 +14770,9 @@
     }
   },
   "metadataScore": {
-    "missingFields": "{count, plural, =0 {no fields missing - edit metadata} one {# field missing - edit metadata} other {# fields missing - edit metadata}}"
+    "missingFields": "{count, plural, =0 {no fields missing - edit metadata} one {# field missing - edit metadata} other {# fields missing - edit metadata}}",
+    "chipLabel": "Metadata",
+    "chipAria": "Metadata score: {score}"
   },
   "migration": {
     "sidebarTitle": "Booklore Import",
@@ -15123,7 +15360,8 @@
       "bookmarkSaveFailed": "Could not add the bookmark",
       "bookmarkDeleteFailed": "Could not remove the bookmark",
       "bookmarkUpdateFailed": "Could not save the bookmark",
-      "marksLoadFailed": "Could not load your highlights and bookmarks"
+      "marksLoadFailed": "Could not load your highlights and bookmarks",
+      "noteDeleteFailed": "Could not delete the note"
     },
     "newerPositionDialog": {
       "title": "Continue from another device?",
@@ -15392,8 +15630,34 @@
         "action": "Read next",
         "open": "Read next: {title}",
         "numbered": "#{index} {title}",
+        "positioned": "{position} {title}",
         "untitled": "Untitled",
         "autoAdvanceHint": "Turn the page again to continue"
+      },
+      "notes": {
+        "title": "Notes",
+        "button": "Notes",
+        "buttonOnPage": "{count, plural, one {Notes, # on this page} other {Notes, # on this page}}",
+        "buttonOnPages": "{count, plural, one {Notes, # on these pages} other {Notes, # on these pages}}",
+        "close": "Close notes",
+        "addToPage": "Add note to page {page}",
+        "addToPages": "Add note to pages {start}-{end}",
+        "empty": "No notes in this book yet",
+        "emptyHint": "Notes stay with the page they are added to.",
+        "loading": "Loading notes",
+        "loadError": "Could not load your notes",
+        "loadMore": "Load more notes",
+        "loadingMore": "Loading more notes…",
+        "page": "Page {page}",
+        "more": "More for the note on page {page}",
+        "edit": "Edit",
+        "delete": "Delete",
+        "addTitle": "Add note",
+        "editTitle": "Edit note",
+        "whichPage": "Which page",
+        "color": "Color",
+        "note": "Note",
+        "saveShortcut": "Press Ctrl+Enter or ⌘+Enter to save"
       }
     },
     "audiobook": {
@@ -15839,6 +16103,29 @@
       "complete": "Complete",
       "moreVolumes": "{count, plural, one {# more volume} other {# more volumes}}",
       "label": "{name}, {read} of {total} volumes read"
+    },
+    "units": {
+      "volumeToken": "Vol. {index}",
+      "chapterToken": "Ch. {index}",
+      "issueToken": "#{index}",
+      "issueInVolumeToken": "v{volume} #{index}",
+      "chapterInVolumeToken": "Vol. {volume} Ch. {index}",
+      "chapterCount": "{count, plural, one {# chapter} other {# chapters}}",
+      "issueCount": "{count, plural, one {# issue} other {# issues}}",
+      "volumesAndChapters": "{volumes, plural, one {# volume} other {# volumes}} · {chapters, plural, one {# chapter} other {# chapters}}",
+      "volumesAndIssues": "{volumes, plural, one {# volume} other {# volumes}} · {issues, plural, one {# issue} other {# issues}}",
+      "chaptersRead": "{count, plural, one {# chapter} other {# chapters}} · {read} read",
+      "issuesRead": "{count, plural, one {# issue} other {# issues}} · {read} read",
+      "missingList": "missing {list}",
+      "countChip": "{volumes} + {chapters}",
+      "cardLabel": "{name}, {read} of {total} read",
+      "tabs": {
+        "label": "Filter books by kind",
+        "all": "All",
+        "volumes": "Volumes",
+        "chapters": "Chapters",
+        "issues": "Issues"
+      }
     }
   },
   "smartScope": {
@@ -15930,6 +16217,11 @@
       "emptyTitle": "No data yet",
       "emptyDescription": "No data available for this chart",
       "unknownField": "{count, plural, =0 {no data for this field} one {# book has no data for this field} other {# books have no data for this field}}"
+    },
+    "drillDown": {
+      "entryBooks": "{name}, {count, plural, one {# book} other {# books}}",
+      "entrySize": "{name}, {size}",
+      "tapAgain": "Tap again to open"
     },
     "breakdown": {
       "ariaLabel": "Break down by source or format"
@@ -16790,6 +17082,7 @@
         "broken_covers": "{count, plural, =0 {Nothing to clean} one {Cleared one broken cover reference} other {Cleared # broken cover references}}",
         "orphaned_cover_dirs": "{count, plural, =0 {Nothing to clean} one {Removed one orphaned cover folder} other {Removed # orphaned cover folders}}"
       },
+      "stillOnDisk": "{count, plural, one {Kept one book because its file is still on disk. Rescan its library to bring it back.} other {Kept # books because their files are still on disk. Rescan their libraries to bring them back.}}",
       "pagination": {
         "label": "Missing resource pages",
         "page": "Page {page} of {total}"

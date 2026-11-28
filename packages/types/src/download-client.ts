@@ -128,6 +128,10 @@ export interface DownloadClientItem {
   /** The password itself never leaves the server; this only says whether one is stored. */
   hasPassword: boolean;
   category: string;
+  /** Audiobook grabs go here instead of `category`. Null keeps them under `category`. */
+  audiobookCategory: string | null;
+  /** Releases in a comic archive format (CBZ, CBR, CB7) go here instead of `category`. Null keeps them under `category`. */
+  comicCategory: string | null;
   useHardlinks: boolean;
   /** Only ever true for a client `DOWNLOAD_CLIENT_REMOVES_COMPLETED` allows. */
   removeCompletedDownloads: boolean;
@@ -181,7 +185,9 @@ export interface DownloadClientReconciliationItem {
 export interface DownloadClientReconciliationResult {
   clientId: number;
   supported: boolean;
+  /** The client's default category. `ownershipMarkers` holds every category the inventory covers. */
   ownershipMarker: string;
+  ownershipMarkers: string[];
   truncated: boolean;
   items: DownloadClientReconciliationItem[];
   missingAttempts: DownloadClientReconciliationAttempt[];
@@ -205,6 +211,10 @@ export interface CreateDownloadClientPayload {
   enabled?: boolean;
   priority?: number;
   category?: string;
+  /** Null or blank clears the override, filing audiobooks under `category` as before. */
+  audiobookCategory?: string | null;
+  /** Null or blank clears the override, filing comic archives under `category` as before. */
+  comicCategory?: string | null;
   useHardlinks?: boolean;
   /** Defaults to false, which keeps every download in the client as before. */
   removeCompletedDownloads?: boolean;
@@ -288,7 +298,11 @@ export const UNSETTLED_BOOK_REQUEST_DOWNLOAD_STATUSES: readonly BookRequestDownl
   "needs_review",
 ];
 
-export const BOOK_REQUEST_DOWNLOAD_SOURCES = ["magnet", "torrent_file", "direct_url", "nzb_file", "shelfmark"] as const;
+/**
+ * `upload` is a person sending the book's files from their own device. It is an attempt with no
+ * client and nothing to poll; released clients read a source they do not know as "other".
+ */
+export const BOOK_REQUEST_DOWNLOAD_SOURCES = ["magnet", "torrent_file", "direct_url", "nzb_file", "shelfmark", "upload"] as const;
 export type BookRequestDownloadSource = (typeof BOOK_REQUEST_DOWNLOAD_SOURCES)[number];
 
 /** Which kind of client can carry out a grab of each source. */
@@ -298,6 +312,7 @@ export const DELIVERY_BY_DOWNLOAD_SOURCE: Record<BookRequestDownloadSource, Down
   direct_url: "file",
   shelfmark: "file",
   nzb_file: "usenet",
+  upload: "file",
 };
 
 export interface BookRequestDownloadItem {
@@ -336,6 +351,14 @@ export interface BookRequestDownloadItem {
    * Null everywhere else, including once one of them has been chosen.
    */
   releaseUnits: ReleaseUnitChoice[] | null;
+  /**
+   * Set only on an `upload` attempt: who sent the files, and how many of them the attempt expects
+   * and already holds. Absent on servers older than `book-request-upload`.
+   */
+  uploadedByUserId?: number | null;
+  uploadedByName?: string | null;
+  uploadFileCount?: number | null;
+  uploadFilesReceived?: number | null;
 }
 
 export interface SelectReleaseUnitPayload {

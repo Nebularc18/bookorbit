@@ -103,12 +103,16 @@ describe('active locale', () => {
     catalog.book.filter.fields.title = 'Titel'
     catalog.book.filter.operators.contains = 'enthält'
     catalog.book.sort.fields.title = 'Titel'
+    catalog.book.readStatus.read = 'Abgeschlossen'
     i18n.global.setLocaleMessage('de', compileIcuCatalog(catalog, 'de'))
     activateI18nLocale('de')
 
     expect(fieldLabel('title')).toBe('Titel')
     expect(operatorLabel('contains')).toBe('enthält')
     expect(sortFieldLabel('title')).toBe('Titel')
+    const finished: Rule = { type: 'rule', field: 'readStatus', operator: 'includesAny', value: ['read'] }
+    expect(ruleToParts(finished).value).toBe('Abgeschlossen')
+    expect(ruleToTokenParts(finished).value).toBe('Abgeschlossen')
   })
 })
 
@@ -182,6 +186,11 @@ describe('ruleToParts', () => {
   it('renders an up-next rule with no value', () => {
     const rule: Rule = { type: 'rule', field: 'seriesStatus', operator: 'isUpNext' }
     expect(ruleToParts(rule)).toEqual({ field: 'Series Status', operator: 'is up next', value: null })
+  })
+
+  it('renders a has-gaps rule with no value', () => {
+    const rule: Rule = { type: 'rule', field: 'seriesStatus', operator: 'hasGaps' }
+    expect(ruleToParts(rule)).toEqual({ field: 'Series Status', operator: 'has gaps', value: null })
   })
 
   it('renders withinLast rules with a days suffix', () => {

@@ -37,6 +37,7 @@ function validRuleValue(operator: RuleOperator, field: RuleField): { value?: unk
     case 'isLocked':
     case 'isUnlocked':
     case 'isUpNext':
+    case 'hasGaps':
     case 'isTrue':
     case 'isFalse':
       return {};
@@ -104,6 +105,14 @@ describe('validateGroupRule', () => {
     const result = validateGroupRule(rule);
     expect(result).toEqual(rule);
   });
+
+  it.each([undefined, 'Civil War', [1], [], ['  '], Array(21).fill('Civil War')].map((value) => ({ value })))(
+    'rejects invalid story arc selections (%j)',
+    ({ value }) => {
+      const group = { type: 'group', join: 'AND', rules: [{ type: 'rule', field: 'storyArc', operator: 'includesAny', value }] };
+      expect(() => validateGroupRule(group)).toThrow(BadRequestException);
+    },
+  );
 
   it('accepts valid OR join', () => {
     const rule = {

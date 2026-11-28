@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
@@ -7,6 +7,7 @@ import { hash } from 'bcryptjs';
 
 import { Permission, withRequiredPermissions } from '@bookorbit/types';
 import type {
+  InvitationLifetimeMinutes,
   UserAttentionReason,
   UserLibraryGrant,
   UserListSortDirection,
@@ -21,6 +22,10 @@ import { AuthenticationPolicyService } from '../../common/services/authenticatio
 
 type Db = NodePgDatabase<typeof schema>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+export const PASSWORD_RESET_LIFETIME_MINUTES = 15;
+type ResetTokenTarget = Pick<typeof schema.users.$inferSelect, 'isDefaultPassword' | 'provisioningMethod' | 'isSuperuser'>;
+export type IssuedResetToken = { rawToken: string; expiresAt: Date };
 
 export type ManagedUserMutationStatus = 'updated' | 'target_not_found' | 'requester_not_superuser' | 'last_superuser';
 export type SuperuserTransitionStatus = ManagedUserMutationStatus | 'unchanged' | 'self_target' | 'shared_target' | 'target_no_oidc';
@@ -390,6 +395,60 @@ export class UserRepository {
     return user;
   }
 
+  async createManagedAccount(
+    data: typeof schema.users.$inferInsert,
+    permissionNames: Permission[],
+    libraryIds: number[],
+    kindleEmail: string | undefined,
+    invitationLifetimeMinutes: InvitationLifetimeMinutes | null,
+  ) {
+    return this.db.transaction(async (tx) => {
+      const [user] = await tx
+        .insert(schema.users)
+        .values(data)
+        .returning({ id: schema.users.id, username: schema.users.username, name: schema.users.name });
+      await this.insertPermissions(tx, user.id, permissionNames);
+      await this.assignViewerLibraries(user.id, libraryIds, tx);
+      if (kindleEmail) await this.addKindleRecipient(tx, user.id, kindleEmail);
+      const resetToken = invitationLifetimeMinutes === null ? null : await this.issueResetToken(tx, user.id, invitationLifetimeMinutes);
+      return { ...user, resetToken };
+    });
+  }
+
+  private async addKindleRecipient(tx: Tx, userId: number, email: string) {
+    const table = schema.emailRecipients;
+    const inserted = await tx
+      .insert(table)
+      .values({ userId, name: 'Kindle', email, deviceType: 'kindle' })
+      .onConflictDoNothing()
+      .returning({ id: table.id });
+    if (inserted.length) return;
+    const [existing] = await tx
+      .select({ deviceType: table.deviceType })
+      .from(table)
+      .where(and(eq(table.userId, userId), sql`lower(${table.email}) = lower(${email})`))
+      .limit(1);
+    if (existing?.deviceType !== 'kindle') throw new ConflictException({ errorCode: 'KINDLE_RECIPIENT_CONFLICT' });
+  }
+
+  async recentKindleRecipients(targetUserId: number, requesterIsSuperuser: boolean) {
+    const recipients = schema.emailRecipients;
+    return this.db
+      .select({ isSuperuser: schema.users.isSuperuser, email: recipients.email })
+      .from(schema.users)
+      .leftJoin(
+        recipients,
+        and(
+          eq(recipients.userId, schema.users.id),
+          eq(recipients.deviceType, 'kindle'),
+          requesterIsSuperuser ? undefined : eq(schema.users.isSuperuser, false),
+        ),
+      )
+      .where(eq(schema.users.id, targetUserId))
+      .orderBy(desc(recipients.id))
+      .limit(5);
+  }
+
   async update(id: number, data: Partial<Pick<typeof schema.users.$inferInsert, 'name' | 'email' | 'active' | 'settings' | 'seeOwnRequestedBooks'>>) {
     const { settings, ...rest } = data;
     const setData: Record<string, unknown> = { ...rest, updatedAt: new Date() };
@@ -413,7 +472,7 @@ export class UserRepository {
   async updateManagedUser(
     requestingUserId: number,
     targetUserId: number,
-    data: Partial<Pick<typeof schema.users.$inferInsert, 'name' | 'email' | 'active'>>,
+    data: Partial<Pick<typeof schema.users.$inferInsert, 'name' | 'email' | 'active'>> & { kindleEmail?: string },
   ): Promise<{ status: ManagedUserMutationStatus; user?: Awaited<ReturnType<UserRepository['update']>> }> {
     return this.db.transaction(async (tx) => {
       await this.authenticationPolicy.lockAdministratorAvailability(tx);
@@ -424,9 +483,11 @@ export class UserRepository {
         return { status: 'last_superuser' };
       }
 
+      const { kindleEmail, ...profile } = data;
+      if (kindleEmail) await this.addKindleRecipient(tx, targetUserId, kindleEmail);
       const [user] = await tx
         .update(schema.users)
-        .set({ ...data, updatedAt: new Date() })
+        .set({ ...profile, updatedAt: new Date() })
         .where(eq(schema.users.id, targetUserId))
         .returning({
           id: schema.users.id,
@@ -463,20 +524,15 @@ export class UserRepository {
     });
   }
 
-  /**
-   * The one chokepoint every assignment path reaches, which is why the dependency rule lives here
-   * rather than in the service: user creation, shared-user creation, the permissions endpoint and
-   * OIDC auto-provisioning all end up on this line, and the OIDC one skips the service's own
-   * normalisation entirely. A permission that is inert without another is granted with it.
-   */
-  async setPermissions(userId: number, permissionNames: Permission[]) {
+  private async insertPermissions(tx: Tx, userId: number, permissionNames: Permission[]) {
     const resolved = withRequiredPermissions(permissionNames);
+    if (resolved.length) await tx.insert(schema.userPermissions).values(resolved.map((permissionName) => ({ userId, permissionName })));
+  }
 
+  async setPermissions(userId: number, permissionNames: Permission[]) {
     await this.db.transaction(async (tx) => {
       await tx.delete(schema.userPermissions).where(eq(schema.userPermissions.userId, userId));
-      if (resolved.length > 0) {
-        await tx.insert(schema.userPermissions).values(resolved.map((permissionName) => ({ userId, permissionName })));
-      }
+      await this.insertPermissions(tx, userId, permissionNames);
     });
   }
 
@@ -567,20 +623,35 @@ export class UserRepository {
     return this.db.query.users.findFirst({ where: eq(schema.users.email, email) });
   }
 
-  async generateResetToken(userId: number): Promise<string> {
+  async generateResetToken(userId: number, lifetimeFor?: (target: ResetTokenTarget) => number) {
+    return this.db.transaction(async (tx) => {
+      // Serialize reissues with password setup and role changes before choosing the link lifetime.
+      const [target] = await tx
+        .select({
+          isDefaultPassword: schema.users.isDefaultPassword,
+          provisioningMethod: schema.users.provisioningMethod,
+          isSuperuser: schema.users.isSuperuser,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .for('update');
+      if (!target) throw new NotFoundException('User not found');
+      return this.issueResetToken(tx, userId, lifetimeFor?.(target) ?? PASSWORD_RESET_LIFETIME_MINUTES);
+    });
+  }
+
+  private async issueResetToken(tx: Tx, userId: number, lifetimeMinutes: number): Promise<IssuedResetToken> {
     const rawToken = randomBytes(32).toString('hex');
     const tokenHash = createHash('sha256').update(rawToken).digest('hex');
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + lifetimeMinutes * 60_000);
 
-    await this.db.transaction(async (tx) => {
-      await tx
-        .update(schema.passwordResetTokens)
-        .set({ usedAt: new Date() })
-        .where(and(eq(schema.passwordResetTokens.userId, userId), isNull(schema.passwordResetTokens.usedAt)));
-      await tx.insert(schema.passwordResetTokens).values({ userId, tokenHash, expiresAt });
-    });
+    await tx
+      .update(schema.passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(and(eq(schema.passwordResetTokens.userId, userId), isNull(schema.passwordResetTokens.usedAt)));
+    await tx.insert(schema.passwordResetTokens).values({ userId, tokenHash, expiresAt });
 
-    return rawToken;
+    return { rawToken, expiresAt };
   }
 
   async clearLockout(userId: number): Promise<void> {
@@ -662,9 +733,9 @@ export class UserRepository {
       .where(eq(schema.users.id, userId));
   }
 
-  async assignViewerLibraries(userId: number, libraryIds: number[]) {
+  async assignViewerLibraries(userId: number, libraryIds: number[], executor: Db | Tx = this.db) {
     if (libraryIds.length === 0) return;
-    await this.db
+    await executor
       .insert(schema.userLibraryAccess)
       .values(libraryIds.map((libraryId) => ({ userId, libraryId, accessLevel: 'viewer' as const })))
       .onConflictDoNothing();

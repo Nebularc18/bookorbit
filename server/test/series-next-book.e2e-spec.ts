@@ -151,6 +151,8 @@ describe('Series next readable book (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, ()
         format: 'cbz',
         title: 'Issue 9',
         seriesIndex: '9',
+        seriesUnit: null,
+        seriesVolumeIndex: null,
       },
     });
   });
@@ -166,6 +168,8 @@ describe('Series next readable book (e2e)', { timeout: SCENARIO_TIMEOUT_MS }, ()
         format: 'cbr',
         title: 'Issue 10',
         seriesIndex: '10',
+        seriesUnit: null,
+        seriesVolumeIndex: null,
       },
     });
   });

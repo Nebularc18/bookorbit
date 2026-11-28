@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SeriesSummary, SeriesVolumeSlot } from '@bookorbit/types'
 import { seriesRowFacts } from '../lib/series-summary'
+import { ladderNumberToken } from '../lib/series-unit-label'
 
 /**
  * One segment per volume the series should have: read, in progress, in the library unread, or
@@ -36,7 +37,7 @@ const label = computed(() => {
 })
 
 function segmentTitle(slot: SeriesVolumeSlot): string {
-  const number = slot.index === null ? null : `#${slot.index}`
+  const number = slot.index === null ? null : ladderNumberToken(t, slot.index, props.series.unitCounts, slot.volumeIndex)
   if (slot.status === 'missing') return t('series.track.slotMissing', { number: number ?? '' }).trim()
   const name = slot.title ?? t('series.track.untitled')
   return [number, name].filter(Boolean).join(' ')
@@ -54,7 +55,7 @@ function segmentTitle(slot: SeriesVolumeSlot): string {
   >
     <span
       v-for="(slot, i) in segments"
-      :key="`${slot.index ?? 'x'}-${slot.bookId ?? i}`"
+      :key="`${slot.volumeIndex ?? ''}-${slot.index ?? 'x'}-${slot.bookId ?? i}`"
       class="volume-seg min-w-0.5 flex-1 rounded-[2px]"
       :data-status="slot.status"
       :title="segmentTitle(slot)"
